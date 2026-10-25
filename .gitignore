@@ -1,0 +1,11 @@
+signing/
+*.jks
+*.keystore
+*.idsig
+*.apk
+*.zip
+__pycache__/
+*.pyc
+.DS_Store
+evidence/
+build/
