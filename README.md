@@ -2,7 +2,7 @@
 
 Android TV adaptation patches for [AniCh](https://github.com/Sle2p/AniCh) 1.5.27. Android 8.0+ / ARMv7. Application: **AniTV**, package: `tvx.anich`. Coexists with the original app.
 
-![AniTV](design/anitv-banner-source.png)
+![AniTV](anitv-banner-source.png)
 
 ## Download
 
@@ -34,6 +34,8 @@ Get the latest APK from [Releases](https://github.com/Emokui/AniTV/releases). Cu
 This is an APK adaptation patch, **not a recovered full Flutter project** or an official release. Upstream: [Sle2p/AniCh](https://github.com/Sle2p/AniCh), [official releases](https://github.com/Sle2p/AniCh/releases). Original application and third-party components retain their respective rights and licenses; this repository does not relicense them.
 
 MP4 uses HTTP Range MediaDataSource with NuPlayer. HLS still uses the system URL playback path and some sources fail. No automatic next episode. Original playback settings are not all connected to the native player. Hardware video layers may be absent in ADB screenshots. Index services may return HTTP 500. Shorter transitions and cache limits are not a measured FPS or total-memory improvement.
+
+Download and extract `AniTV-v1.9-source.zip` for the complete project directory tree. The paths below are inside that bundle.
 
 ## Contents
 
