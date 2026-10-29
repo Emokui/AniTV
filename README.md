@@ -2,7 +2,7 @@
 
 面向 Android TV 的原生番剧客户端，支持 Android 8.0 及以上。
 
-[下载 1.1 安装包](https://github.com/Emokui/AniTV/releases/download/native-v1.1/AniTV-1.1.apk) · [下载可构建源码](https://github.com/Emokui/AniTV/releases/download/native-v1.1/AniTV-1.1-source.zip) · [发布页面](https://github.com/Emokui/AniTV/releases/tag/native-v1.1)
+[下载 1.1 安装包](https://github.com/Emokui/AniTV/releases/download/native-v1.1-30105/AniTV-1.1.apk) · [下载可构建源码](https://github.com/Emokui/AniTV/releases/download/native-v1.1-30105/AniTV-1.1-source.zip) · [发布页面](https://github.com/Emokui/AniTV/releases/tag/native-v1.1-30105)
 
 ![AniTV](anitv-banner-source.png)
 
@@ -23,7 +23,8 @@ UI 与资源独立实现，采用 BT 风格的深色布局和焦点效果，未�
 
 | 按键 | 操作 |
 | --- | --- |
-| 侧栏确认 | 切换页面；确认当前页刷新 |
+| 侧栏确认 | 切换页面；推荐/索引当前页短按不刷新 |
+| 推荐/索引长按确认 2 秒 | 刷新当前页，并让剧集缓存失效；下次打开番剧更新选集 |
 | 侧栏右键 | 进入当前页内容 |
 | 索引中菜单 | 直接聚焦类型 / 语言 / 年份筛选栏 |
 | 播放中确认 | 暂停 / 继续；进度条仅暂停时显示 |
@@ -59,8 +60,14 @@ bash build-native.sh
 
 脚本首次构建会生成本地签名，之后复用。产物为 `app/build/outputs/apk/release/app-release.apk`。源码包不含发布私钥，自行构建的签名与发布包不同。
 
-本地回归：121 项通过、1 项显式在线测试跳过，Debug / Release Lint 与 Release 构建通过。电视实际遥控和播放体验由用户验证。
+本地回归：141 项通过、1 项显式在线测试跳过，Debug / Release Lint 与 Release 构建通过。电视实际遥控和播放体验由用户验证。
 
 ## 来源
 
 推荐、索引、搜索、详情和播放接入 AniCh 兼容接口。第三方服务、内容与组件保留各自权利；本项目不改变相关授权。旧补丁版基于 [AniCh](https://github.com/Sle2p/AniCh) 1.5.27，原生版是独立 Android 实现。
+
+## 缓存策略（30105）
+
+推荐/索引及剧集缓存默认有效 12 小时；推荐/索引命中有效磁盘缓存不额外请求网络。短按推荐/索引只切页，当前页短按不刷新；长按确认 2 秒刷新当前页，同时使剧集内存/磁盘缓存失效，下次打开番剧时更新选集，不批量预加载。刷新保留当前画面，数据返回后替换；继续翻页仍按需取下一页。图片磁盘缓存不设固定时效，按 64 MiB 容量淘汰。剧集内存缓存仍最多 8 部、合计 2000 集。
+
+30105：剧集磁盘缓存转入内存时继承剩余有效时间；未登录取源最多两个请求并行并保留全部线路。系统重建可恢复目录窗口与番剧位置；后台相关详情页释放海报和请求，保留返回顺序。观看历史超过 100 部时同时清理被挤出的续播进度，不删除收藏与记忆线路。
