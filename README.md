@@ -1,74 +1,66 @@
-# AniTV
+# AniTV 1.1
 
-Android TV adaptation patches for [AniCh](https://github.com/Sle2p/AniCh) 1.5.27. Android 8.0+ / ARMv7. Application: **AniTV**, package: `tvx.anich`. Coexists with the original app.
+面向 Android TV 的原生番剧客户端，支持 Android 8.0 及以上。
+
+[下载 1.1 安装包](https://github.com/Emokui/AniTV/releases/download/native-v1.1/AniTV-1.1.apk) · [下载可构建源码](https://github.com/Emokui/AniTV/releases/download/native-v1.1/AniTV-1.1-source.zip) · [发布页面](https://github.com/Emokui/AniTV/releases/tag/native-v1.1)
 
 ![AniTV](anitv-banner-source.png)
 
-## Download
+## 功能
 
-Get the latest APK from [Releases](https://github.com/Emokui/AniTV/releases). Current patch: **v1.9**, based on AniCh **1.5.27**.
+- 深色侧栏与海报网格，遥控器方向键浏览、确认切换页面。
+- 推荐、索引、类型/语言/年份筛选、搜索、番剧介绍与相关系列。
+- 带封面的选集窗口，右侧四分之一宽度线路面板，显示首字节延迟。
+- MP4 使用系统 NuPlayer，HLS 使用 Media3；支持暂停、快进、自动下一集。
+- 按番剧记忆手动选择的线路，下一集和重新进入时优先匹配。
+- 历史位于收藏上方，短按进入介绍页，长按确认删除记录；保留上次剧集和进度。
+- 正常账号登录、本机收藏、分类缓存清理；图片和接口缓存有上限。
+- 剧集列表可从本地缓存先显示、后台更新；索引按三页窗口回收，保留向前回看能力。
 
-## Features
+UI 与资源独立实现，采用 BT 风格的深色布局和焦点效果，未使用 BT 反编译代码或资源。
 
-- Android MediaPlayer + SurfaceView hardware playback, adapted for green-screen and audio problems on tested Hisense TVs.
-- Original right-side episode and source selection panels. No on-screen danmaku.
-- Episode / Character / Recommendation detail tabs; Episodes selected and focused by default.
-- Removed Recently Updated home tab; fixed index filters; Back from index grid returns to filters.
-- Press Back twice within two seconds on the home screen to exit.
-- App-only density/font adjustment, lighter card shadows, 48 MiB Skia resource cache cap, 300ms to 100ms tab transitions.
-- Minimal AniTV wordmark and separate TV banner.
+## 遥控操作
 
-## Remote controls
-
-| Key | During playback |
+| 按键 | 操作 |
 | --- | --- |
-| OK | Pause / resume |
-| Left / Right | Seek about 10 seconds |
-| Up | Open episode sidebar |
-| Down / Menu | Open source sidebar |
-| Back in sidebar | Cancel and resume current video / position |
-| Back during playback | Exit playback |
+| 侧栏确认 | 切换页面；确认当前页刷新 |
+| 侧栏右键 | 进入当前页内容 |
+| 索引中菜单 | 直接聚焦类型 / 语言 / 年份筛选栏 |
+| 播放中确认 | 暂停 / 继续；进度条仅暂停时显示 |
+| 播放中左右 | 单按约 10 秒，长按逐步加速至 30 / 60 秒 |
+| 播放中上键 | 选集 |
+| 播放中下键 / 菜单 | 选择线路 |
+| 弹窗返回 | 关闭弹窗，恢复原播放状态 |
+| 播放中返回 | 首次隐藏进度，5 秒内再按退出 |
+| 历史海报长按确认 | 删除该条历史与续播进度 |
 
-## Scope and limitations
+## 安装与版本关系
 
-This is an APK adaptation patch, **not a recovered full Flutter project** or an official release. Upstream: [Sle2p/AniCh](https://github.com/Sle2p/AniCh), [official releases](https://github.com/Sle2p/AniCh/releases). Original application and third-party components retain their respective rights and licenses; this repository does not relicense them.
+原生版包名为 `tvx.anich.preview`，应用显示名称 AniTV。1.1 可覆盖此前原生预览版和 1.0.x，保留其账号、收藏、历史和线路偏好。
 
-MP4 uses HTTP Range MediaDataSource with NuPlayer. HLS still uses the system URL playback path and some sources fail. No automatic next episode. Original playback settings are not all connected to the native player. Hardware video layers may be absent in ADB screenshots. Index services may return HTTP 500. Shorter transitions and cache limits are not a measured FPS or total-memory improvement.
+1.1 是独立原生版的版本号，与旧 APK 补丁版 v1.9 属于不同版本序列。旧版 `tvx.anich` 可共存；两者账号与历史不自动迁移。[旧版 v1.9](https://github.com/Emokui/AniTV/releases/tag/v1.9) 和旧源码包继续保留。
 
-Download and extract `AniTV-v1.9-source.zip` for the complete project directory tree. The paths below are inside that bundle.
+## 性能与限制
 
-## Contents
+海报按实际显示尺寸解码；图片资源缓存 16 MiB、位图池 8 MiB、图片磁盘缓存 64 MiB。接口缓存每目录最多 8 MiB / 24 文件；剧集内存缓存最多 8 部、合计 2000 集。网络与解析工作池分离，工作线程空闲 30 秒后回收。以上不是应用总内存上限。
 
-- `patch/java`: player, data source, sidebar and remote state sources.
-- `patch/smali`: modified original APK classes.
-- `patch/*.c`, `*.map`: JNI bridge and mpv proxy.
-- `patch/patch_flutter_ui.py`: verified ARM32 Flutter AOT modifications.
-- `patch/patch_apk.py`: verified APK repackaging.
-- `patch/classes.dex`, `*.so`: prebuilt patch components.
-- `patch/branding`, `design`: launcher assets, originals and image prompts.
-- `build-scripts`: reference local workflows; configure tools, inputs and temporary paths.
-- `CHANGELOG.md`: detailed changes, tests and limitations (Chinese).
+首次未缓存的数据、真正刷新和播放线路仍依赖接口与网络。HTTP 首字节延迟不代表带宽或完整可播放性。不同电视、编解码格式和第三方线路的兼容性有差异；不宣称固定帧率或总内存降幅。
 
-## Repackage
+## 构建源码
 
-Requires Python 3, Android SDK Build Tools and the exact original ARMv7 APK:
+下载 `AniTV-1.1-source.zip` 并解压，原生 Android 工程位于 `native-preview/`，包含 Java 源码、资源、测试、Gradle Wrapper 和测试素材生成脚本。
 
-```text
-anich-android-armeabi-v7a-1.5.27.apk
-SHA256 f35f1ca9755e0a13486e8c030139ef3a75a609abd061419c19a5a362b0b45069
+需要 JDK 17 或以上、Android SDK（platform 35 / Build Tools 35）以及可访问 Google Maven 和 Maven Central 的网络。配置 `JAVA_HOME` 和 `ANDROID_HOME` 后：
+
+```bash
+cd native-preview
+bash build-native.sh
 ```
 
-Using the prebuilt DEX / SO components:
+脚本首次构建会生成本地签名，之后复用。产物为 `app/build/outputs/apk/release/app-release.apk`。源码包不含发布私钥，自行构建的签名与发布包不同。
 
-```sh
-mkdir -p build
-python3 patch/patch_flutter_ui.py original.apk build/libapp.so
-python3 patch/patch_apk.py original.apk build/unsigned.apk --shim patch/libmpv.so --dex patch/classes.dex --bridge patch/libanichtvbridge.so --app build/libapp.so --branding patch/branding
-zipalign -f -p 4 build/unsigned.apk build/aligned.apk
-apksigner sign --ks /path/to/your-keystore.jks --out build/AniTV.apk build/aligned.apk
-apksigner verify --verbose build/AniTV.apk
-```
+本地回归：121 项通过、1 项显式在线测试跳过，Debug / Release Lint 与 Release 构建通过。电视实际遥控和播放体验由用户验证。
 
-Java rebuilds require JDK 17, Android SDK, apktool and a decoded working directory prepared with `patch/smali`. Native bridges use Zig 0.13.0. Reference scripts accept `ANITV_PROJECT`, `JAVA_HOME`, `ANDROID_HOME` paths.
+## 来源
 
-Signing keys, passwords, TV connection details and runtime logs are excluded. Self-signed builds have a different signature from published APKs and normally cannot update them in place; preserve your data and signing keys.
+推荐、索引、搜索、详情和播放接入 AniCh 兼容接口。第三方服务、内容与组件保留各自权利；本项目不改变相关授权。旧补丁版基于 [AniCh](https://github.com/Sle2p/AniCh) 1.5.27，原生版是独立 Android 实现。

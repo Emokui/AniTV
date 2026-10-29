@@ -9,3 +9,8 @@ __pycache__/
 .DS_Store
 evidence/
 build/
+.tools/
+.gradle/
+local.properties
+**/build/
+native-preview/app/src/androidTest/assets/playback/*
