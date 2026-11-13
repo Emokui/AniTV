@@ -23,7 +23,7 @@ public class TitleCompatibilityTest {
         assertArrayEquals(new String[]{"中文第二季","原名2","别名第二季"}, MetadataTitles.read(new JSONObject(
                 "{\"name\":\"原名2\",\"infobox\":[{\"key\":\"别名\",\"value\":[{\"v\":\"别名第二季\"}]}]}"), "中文第二季"));
     }
-    @Test public void http500RetriesSameEntryAliasAndReusesItForNextEpisode() throws Exception {
+    @Test public void parallelAliasesRetainPreferredNameForNextEpisode() throws Exception {
         AniApp app = (AniApp) RuntimeEnvironment.getApplication();
         new Library(app).prefs.edit().putString("endpoint",Library.DEFAULT_ENDPOINT).commit();
         List<String> queried = new CopyOnWriteArrayList<>();
@@ -41,9 +41,12 @@ public class TitleCompatibilityTest {
                 public void success(List<PlaySource> value){results.add(value);}public void error(String message){errors.add(message);}
             };
             api.sources(42,new String[]{"中文第三季","原名第3期"},new Episode(1,"第1集",true),result);
-            await(results,1);assertTrue(errors.isEmpty());assertEquals(java.util.Arrays.asList("中文第三季","原名第3期"),queried);
+            await(results,1);assertTrue(errors.isEmpty());assertEquals(new java.util.HashSet<>(java.util.Arrays.asList("中文第三季","原名第3期")),new java.util.HashSet<>(queried));
+            Field preferred=PlaybackApi.class.getDeclaredField("preferredTitles");preferred.setAccessible(true);
+            assertEquals("原名第3期",((java.util.Map<?,?>)preferred.get(api)).get(42L));
             api.sources(42,new String[]{"中文第三季","原名第3期"},new Episode(2,"第2集",true),result);
-            await(results,2);assertEquals("原名第3期",queried.get(2));assertEquals(4,queried.size());
+            await(results,2);assertEquals(4,queried.size());
+            assertEquals(new java.util.HashSet<>(java.util.Arrays.asList("中文第三季","原名第3期")),new java.util.HashSet<>(queried.subList(2,4)));
         }
     }
     @Test public void exactDuplicateOnlyMergesAndQualityVariantsRemain() {

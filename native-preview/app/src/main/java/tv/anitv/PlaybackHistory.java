@@ -37,14 +37,14 @@ final class PlaybackHistory {
         Entry existing=find(show.id,endpoint);
         if(existing!=null){
             show=new Show(show.id,missingTitle(show)?existing.show.title:show.title,
-                    show.image.isEmpty()?existing.show.image:show.image,show.subtitle.isEmpty()?existing.show.subtitle:show.subtitle);
+                    show.image.isEmpty()?existing.show.image:show.image,show.subtitle.isEmpty()?existing.show.subtitle:show.subtitle,show.r18 || existing.show.r18);
         }
         titles=names(show.id,show.title,titles,existing==null?new String[0]:existing.titles);
         org.json.JSONArray next=new org.json.JSONArray();
         try {
             org.json.JSONArray names=new org.json.JSONArray();for(String title:titles)names.put(title);
             next.put(new org.json.JSONObject().put("id",show.id).put("title",show.title).put("image",show.image)
-                    .put("subtitle",show.subtitle).put("endpoint",endpoint).put("titles",names));
+                    .put("subtitle",show.subtitle).put("r18",show.r18).put("endpoint",endpoint).put("titles",names));
             org.json.JSONArray old=rows();
             for(int i=0;i<old.length() && next.length()<MAX_ENTRIES;i++) {
                 org.json.JSONObject row=old.getJSONObject(i);
@@ -66,7 +66,9 @@ final class PlaybackHistory {
             if(old!=null){oldTitles=new String[old.length()];for(int j=0;j<old.length();j++)oldTitles[j]=old.optString(j);}
             org.json.JSONArray names=new org.json.JSONArray();for(String name:names(metadata.show.id,title,metadata.titles,oldTitles))names.put(name);
             boolean changed=!title.equals(row.optString("title")) || !image.equals(row.optString("image")) || !names.toString().equals(String.valueOf(old));
-            row.put("title",title).put("image",image).put("titles",names);
+            boolean adult=metadata.show.r18 || row.optBoolean("r18");
+            changed |= adult!=row.optBoolean("r18");
+            row.put("title",title).put("image",image).put("titles",names).put("r18",adult);
             if(!metadata.show.subtitle.isEmpty())row.put("subtitle",metadata.show.subtitle);
             catalog.edit().putString("entries",values.toString()).apply();return changed;
         }catch(org.json.JSONException ignored){}
@@ -77,7 +79,7 @@ final class PlaybackHistory {
         for(Entry entry:entries(endpoint)) {
             String key=Long.toString(entry.show.id);int episode=lastEpisode(key,1);long seconds=position(key,episode)/1000;
             String progress=String.format(java.util.Locale.ROOT,"第 %d 集 · %d:%02d",episode,seconds/60,seconds%60);
-            result.add(new Show(entry.show.id,entry.show.title,entry.show.image,progress));
+            result.add(new Show(entry.show.id,entry.show.title,entry.show.image,progress,entry.show.r18));
         }
         return result;
     }
@@ -88,7 +90,7 @@ final class PlaybackHistory {
             org.json.JSONObject row=values.getJSONObject(i);if(!endpoint.equals(row.optString("endpoint")))continue;
             org.json.JSONArray names=row.optJSONArray("titles");String[] titles=new String[names==null?1:names.length()];
             if(names==null)titles[0]=row.optString("title");else for(int j=0;j<titles.length;j++)titles[j]=names.optString(j);
-            result.add(new Entry(new Show(row.getLong("id"),row.getString("title"),row.optString("image"),row.optString("subtitle")),endpoint,titles));
+            result.add(new Entry(new Show(row.getLong("id"),row.getString("title"),row.optString("image"),row.optString("subtitle"),row.optBoolean("r18")),endpoint,titles));
         }catch(org.json.JSONException ignored){}
         return result;
     }
@@ -125,19 +127,14 @@ final class PlaybackHistory {
     private boolean rawContains(long id,String endpoint){org.json.JSONArray rows=rows();for(int i=0;i<rows.length();i++){
         org.json.JSONObject row=rows.optJSONObject(i);if(row!=null&&row.optLong("id")==id&&endpoint.equals(row.optString("endpoint")))return true;
     }return false;}
-    boolean remove(long id,String endpoint){synchronized(LOCK){
-        org.json.JSONArray kept=new org.json.JSONArray(),old=rows();boolean removed=false,otherEndpoint=false;
-        for(int i=0;i<old.length();i++){
-            org.json.JSONObject row=old.optJSONObject(i);if(row==null)continue;
-            if(row.optLong("id")==id && endpoint.equals(row.optString("endpoint"))){removed=true;continue;}
-            if(row.optLong("id")==id)otherEndpoint=true;
-            kept.put(row);
+    boolean hasProgress(String show){return prefs.contains(show+":last");}
+    boolean remove(long id,String endpoint){return removeAll(java.util.Collections.singleton(id),endpoint)>0;}
+    int removeAll(java.util.Set<Long> ids,String endpoint){synchronized(LOCK){
+        org.json.JSONArray kept=new org.json.JSONArray(),old=rows();int count=0;
+        for(int i=0;i<old.length();i++){org.json.JSONObject row=old.optJSONObject(i);if(row==null)continue;
+            if(ids.contains(row.optLong("id")) && endpoint.equals(row.optString("endpoint"))){count++;continue;}kept.put(row);
         }
-        if(!removed)return false;
-        catalog.edit().putString("entries",kept.toString()).putLong("generation",revision()+1).apply();
-        if(!otherEndpoint){SharedPreferences.Editor edit=prefs.edit();String prefix=id+":";
-            for(String key:prefs.getAll().keySet())if(key.startsWith(prefix))edit.remove(key);edit.apply();}
-        return true;
+        if(count>0){catalog.edit().putString("entries",kept.toString()).putLong("generation",revision()+1).apply();pruneProgress(kept);}return count;
     }}
     void clear(){synchronized(LOCK){long next=revision()+1;prefs.edit().clear().apply();catalog.edit().clear().putBoolean("migrated",true).putLong("generation",next).apply();}}
 

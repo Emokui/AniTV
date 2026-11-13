@@ -31,7 +31,7 @@ final class RelatedCodec {
                     JSONObject item=items.getJSONObject(i);
                     add(shows,currentId,item.optLong("id"),item.optString("title"),item.optString("image"),
                             item.optString("type"),item.optString("name"),item.optString("tagline"),
-                            item.optInt("episode"),item.optInt("episodes_total",item.optInt("episodesTotal")));
+                            item.optInt("episode"),item.optInt("episodes_total",item.optInt("episodesTotal")),ContentVisibility.marked(item));
                 }
             }catch(org.json.JSONException e){throw new IOException("关联番剧格式不匹配",e);}
         } else {
@@ -53,16 +53,16 @@ final class RelatedCodec {
                     else if(field==82)type=item.readStringRequireUtf8();
                     else if(!item.skipField(field))throw new IOException("关联条目字段无效");
                 }
-                add(shows,currentId,id,title,image,type,name,tagline,episode,total);
+                add(shows,currentId,id,title,image,type,name,tagline,episode,total,false);
             }
         }
         return new ArrayList<>(shows.values());
     }
-    private static void add(LinkedHashMap<Long,Show> result,long currentId,long id,String title,String image,String type,String name,String tagline,int episode,int total) {
+    private static void add(LinkedHashMap<Long,Show> result,long currentId,long id,String title,String image,String type,String name,String tagline,int episode,int total,boolean r18) {
         if(id<=0 || id>=Show.BANGUMI_OFFSET || id==currentId || title.trim().isEmpty() || result.containsKey(id))return;
         String relation=type;
         if(!name.isEmpty())relation+=(relation.isEmpty()?"":" · ")+name;
         if(relation.isEmpty())relation=tagline.isEmpty()?CatalogCodec.episodes(episode,total):tagline;
-        result.put(id,new Show(id,title,image,relation));
+        result.put(id,new Show(id,title,image,relation,r18 || ContentVisibility.labeled(tagline)));
     }
 }

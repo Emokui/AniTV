@@ -38,7 +38,12 @@ public class RemoteNavigationTest {
     }
     private void waitIdle() {
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
-        SystemClock.sleep(120);
+        android.content.Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+        long duration=android.view.animation.AnimationUtils.loadAnimation(context,tv.anitv.R.anim.page_in).getDuration();
+        float scale=android.provider.Settings.Global.getFloat(context.getContentResolver(),android.provider.Settings.Global.TRANSITION_ANIMATION_SCALE,1f);
+        float propertyScale=android.provider.Settings.Global.getFloat(context.getContentResolver(),android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,1f);
+        long end=SystemClock.uptimeMillis()+Math.max(Math.round(90*propertyScale),Math.round(duration*scale))+32;
+        while(SystemClock.uptimeMillis()<end)SystemClock.sleep(16);
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
     }
     private static RecyclerView grid(View view) {

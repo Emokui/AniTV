@@ -103,7 +103,7 @@ public final class CatalogCodec {
                 long id = o.optLong("id", 0); String title = o.optString("title", "");
                 if (id <= 0 || title.isEmpty()) throw new IOException("列表条目缺少编号或标题");
                 shows.put(id, new Show(id, title, o.optString("image", ""),
-                        o.optString("tagline", episodes(o.optInt("episode"), o.optInt("episodes_total", o.optInt("episodesTotal"))))));
+                        o.optString("tagline", episodes(o.optInt("episode"), o.optInt("episodes_total", o.optInt("episodesTotal")))) ,ContentVisibility.marked(o)));
     }
     static String episodes(int episode, int total) {
         if (episode > 0 && total > 0) return "更新至 " + episode + " / " + total + " 集";

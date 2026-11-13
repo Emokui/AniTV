@@ -1,156 +1,121 @@
 package tv.anitv;
 
 import android.app.Activity;
-import android.media.AudioAttributes;
-import android.media.AudioFocusRequest;
-import android.media.AudioManager;
-import android.media.MediaPlayer;
-import android.media.PlaybackParams;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.SurfaceView;
 import androidx.annotation.OptIn;
+import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
+import androidx.media3.common.MimeTypes;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.SeekParameters;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import okhttp3.Call;
 import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
 
+/** One ExoPlayer path for both progressive media and HLS. */
 @OptIn(markerClass = UnstableApi.class)
 final class NativePlayback implements AutoCloseable {
     interface Listener {
-        void ready();
-        void buffering(boolean buffering);
-        void firstFrame(int width, int height);
-        void ended();
-        void error(String message);
-        void changed();
+        void ready(); void buffering(boolean buffering); void firstFrame(int width,int height);
+        void ended(); void error(String message); void changed();
     }
     private final Activity activity;
     private final SurfaceView surface;
     private final OkHttpClient http;
     private final Listener listener;
-    private final Handler main = new Handler(Looper.getMainLooper());
-    private final ExecutorService worker = WorkPools.fixed(1);
-    private final AudioManager audio;
-    private final AudioFocusRequest focus;
-    private MediaPlayer nativePlayer;
-    private ExoPlayer hlsPlayer;
-    private RangeMediaSource data;
-    private Future<?> preparing;
-    private boolean ready, rendered, resumeAfterFocus, hasFocus, wantPlay, focusRequested, closed;
-    private int generation;
-    private float speed, nativeSpeed=1f;
-    private int aspectMode, videoWidth, videoHeight;
-    NativePlayback(Activity activity, SurfaceView surface, OkHttpClient http, Listener listener) {
-        this.activity = activity; this.surface = surface; this.http = http; this.listener = listener;
+    private final Handler main=new Handler(Looper.getMainLooper());
+    private final ExecutorService worker=WorkPools.fixed(1);
+    private ExoPlayer player;
+    private Future<?> probing;
+    private volatile Call probeCall;
+    private boolean ready,rendered,wantPlay,closed;
+    private int generation,aspectMode,videoWidth,videoHeight;
+    private float speed;
+    NativePlayback(Activity activity,SurfaceView surface,OkHttpClient http,Listener listener){
+        this.activity=activity;this.surface=surface;this.http=http;this.listener=listener;
         android.content.SharedPreferences prefs=new Library(activity).prefs;
         speed=prefs.getFloat("playback-speed",1f);aspectMode=prefs.getInt("video-aspect",0);
-        audio = (AudioManager) activity.getSystemService(android.content.Context.AUDIO_SERVICE);
-        focus = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MOVIE).build())
-                .setOnAudioFocusChangeListener(change -> {
-                    if(closed || !focusRequested)return;
-                    if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
-                        resumeAfterFocus = change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT && playing();
-                        if (nativePlayer != null && ready) nativePlayer.pause();
-                        hasFocus = false; listener.changed();
-                    } else if (change == AudioManager.AUDIOFOCUS_GAIN) {
-                        hasFocus = true; if (nativePlayer != null) nativePlayer.setVolume(1, 1);
-                        if (resumeAfterFocus && nativePlayer != null && ready) nativePlayer.start();
-                        resumeAfterFocus = false; listener.changed();
-                    } else if (change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK && nativePlayer != null) nativePlayer.setVolume(.2f, .2f);
-                }, main).build();
     }
-    void open(PlaySource source, long position, boolean play) {
+    void open(PlaySource source,long position,boolean play){
         if(closed)return;
-        stop(); final int token = generation; wantPlay = play; listener.buffering(true);
-        if (source.hls()) { openHls(source, position, token); return; }
-        RangeMediaSource input = new RangeMediaSource(http, source); data = input;
-        preparing = worker.submit(() -> {
-            try {
-                boolean manifest = input.probeIsHls();
-                main.post(() -> {
-                    if (token != generation) { input.close(); return; }
-                    if (manifest) { input.close(); data = null; openHls(source, position, token); }
-                    else openNative(input, position, token);
-                });
-            } catch (Exception error) {
-                main.post(() -> { if (token == generation) listener.error(error.getMessage() == null ? "视频连接失败" : error.getMessage()); });
+        stop();final int token=generation;wantPlay=play;listener.buffering(true);
+        if(source.hls()){openPlayer(source,position,token,true);return;}
+        String path=okhttp3.HttpUrl.get(source.url).encodedPath().toLowerCase(Locale.ROOT);
+        if(path.endsWith(".mp4") || source.type.toLowerCase(Locale.ROOT).contains("mp4")){
+            openPlayer(source,position,token,false);return;
+        }
+        // Extensionless provider URLs need content detection, not a forced MP4/HLS MIME type.
+        Request.Builder request=new Request.Builder().url(source.url);
+        for(Map.Entry<String,String> header:source.headers.entrySet())request.header(header.getKey(),header.getValue());
+        request.header("Range","bytes=0-127").header("Accept-Encoding","identity");
+        final Call call=http.newCall(request.build());probeCall=call;
+        probing=worker.submit(()->{
+            try(Response response=call.execute()){
+                if(!response.isSuccessful() || response.body()==null)throw new IOException("视频 HTTP "+response.code());
+                okio.BufferedSource input=response.body().source();input.request(128);
+                String prefix=new String(input.readByteArray(Math.min(128,input.getBuffer().size())),StandardCharsets.UTF_8);
+                final boolean hls=prefix.replace("\uFEFF","").trim().startsWith("#EXTM3U");
+                main.post(()->{if(token==generation && !closed){probeCall=null;openPlayer(source,position,token,hls);}});
+            }catch(IOException error){
+                main.post(()->{if(token==generation && !closed){probeCall=null;listener.buffering(false);listener.error("视频连接失败："+error.getMessage());}});
             }
         });
     }
-    private void openNative(RangeMediaSource input, long position, int token) {
-        MediaPlayer player = new MediaPlayer(); nativePlayer = player;
-        player.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MOVIE).build());
-        player.setDisplay(surface.getHolder()); player.setScreenOnWhilePlaying(true); player.setVolume(1, 1);
-        player.setOnPreparedListener(p -> {
-            if (token != generation || nativePlayer != p) return;
-            ready = true; listener.ready();
-            if (position > 0 && position < p.getDuration()) {
-                p.setOnSeekCompleteListener(s -> {
-                    s.setOnSeekCompleteListener(null); if (token == generation && wantPlay) play();
-                    listener.changed();
-                }); p.seekTo(position, MediaPlayer.SEEK_CLOSEST_SYNC);
-            } else if (wantPlay) play();
-            listener.changed();
-        });
-        player.setOnVideoSizeChangedListener((p, w, h) -> { if (token == generation) fit(w, h); });
-        player.setOnInfoListener((p, what, extra) -> {
-            if (token != generation) return true;
-            if (what == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) {
-                rendered = true;
-                listener.buffering(false); listener.firstFrame(p.getVideoWidth(), p.getVideoHeight());
-            } else if (what == MediaPlayer.MEDIA_INFO_BUFFERING_START) listener.buffering(true);
-            else if (what == MediaPlayer.MEDIA_INFO_BUFFERING_END) listener.buffering(false);
-            return false;
-        });
-        player.setOnCompletionListener(p -> { if (token == generation) listener.ended(); });
-        player.setOnErrorListener((p, what, extra) -> {
-            if (token == generation) { ready = false; listener.error("播放失败（" + what + "/" + extra + "），可重试或切换线路"); }
-            return true;
-        });
-        try { player.setDataSource(input); player.prepareAsync(); }
-        catch (Exception error) { listener.error("无法准备视频，请重试或切换线路"); }
-    }
-    private void openHls(PlaySource source, long position, int token) {
-        DefaultHttpDataSource.Factory network = new DefaultHttpDataSource.Factory()
-                .setUserAgent(PlaySource.USER_AGENT).setDefaultRequestProperties(source.headers)
+    static DefaultHttpDataSource.Factory httpDataSource(PlaySource source){
+        return new DefaultHttpDataSource.Factory()
+                .setDefaultRequestProperties(source.headers)
+                .setAllowCrossProtocolRedirects(true)
                 .setConnectTimeoutMs(12000).setReadTimeoutMs(15000);
-        hlsPlayer = new ExoPlayer.Builder(activity).setMediaSourceFactory(new DefaultMediaSourceFactory(network)).build();
-        hlsPlayer.setAudioAttributes(new androidx.media3.common.AudioAttributes.Builder()
-                .setUsage(androidx.media3.common.C.USAGE_MEDIA).setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MOVIE).build(), true);
-        hlsPlayer.setHandleAudioBecomingNoisy(true); hlsPlayer.setVideoSurfaceView(surface);
-        hlsPlayer.setPlaybackSpeed(speed);
-        hlsPlayer.addListener(new Player.Listener() {
-            @Override public void onPlaybackStateChanged(int state) {
-                if (token != generation) return;
-                listener.buffering(state == Player.STATE_BUFFERING);
-                if (state == Player.STATE_READY) { ready = true; listener.ready(); }
-                if (state == Player.STATE_ENDED) listener.ended();
+    }
+    private void openPlayer(PlaySource source,long position,int token,boolean hls){
+        final ExoPlayer opened=new ExoPlayer.Builder(activity)
+                .setMediaSourceFactory(new DefaultMediaSourceFactory(httpDataSource(source))).build();
+        player=opened;
+        opened.setAudioAttributes(new androidx.media3.common.AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),true);
+        opened.setHandleAudioBecomingNoisy(true);opened.setVideoSurfaceView(surface);
+        opened.setSeekParameters(SeekParameters.CLOSEST_SYNC);opened.setPlaybackSpeed(speed);
+        opened.addListener(new Player.Listener(){
+            private boolean current(){return token==generation && player==opened;}
+            @Override public void onPlaybackStateChanged(int state){
+                if(!current())return;
+                listener.buffering(state==Player.STATE_BUFFERING);
+                if(state==Player.STATE_READY){ready=true;listener.ready();}
+                if(state==Player.STATE_ENDED)listener.ended();
                 listener.changed();
             }
-            @Override public void onIsPlayingChanged(boolean playing) { if (token == generation) listener.changed(); }
-            @Override public void onRenderedFirstFrame() {
-                if (token != generation || hlsPlayer == null) return;
-                rendered = true;
-                androidx.media3.common.VideoSize size = hlsPlayer.getVideoSize();
-                fit(Math.round(size.width*size.pixelWidthHeightRatio), size.height); listener.firstFrame(size.width, size.height);
+            @Override public void onIsPlayingChanged(boolean playing){if(current())listener.changed();}
+            @Override public void onRenderedFirstFrame(){
+                if(!current())return;rendered=true;
+                androidx.media3.common.VideoSize size=opened.getVideoSize();
+                fit(Math.round(size.width*size.pixelWidthHeightRatio),size.height);
+                listener.firstFrame(size.width,size.height);
             }
-            @Override public void onVideoSizeChanged(androidx.media3.common.VideoSize size) { if (token == generation) fit(Math.round(size.width*size.pixelWidthHeightRatio), size.height); }
-            @Override public void onPlayerError(PlaybackException error) {
-                if (token == generation) { ready = false; listener.error("播放失败：" + error.getErrorCodeName() + "，可重试或切换线路"); }
+            @Override public void onVideoSizeChanged(androidx.media3.common.VideoSize size){
+                if(current())fit(Math.round(size.width*size.pixelWidthHeightRatio),size.height);
+            }
+            @Override public void onPlayerError(PlaybackException error){
+                if(current()){ready=false;listener.buffering(false);listener.error("播放失败："+error.getErrorCodeName()+"，可重试或切换线路");}
             }
         });
-        MediaItem.Builder media = new MediaItem.Builder().setUri(source.url);
-        media.setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8); // Includes sniffed manifests without an extension.
-        hlsPlayer.setMediaItem(media.build()); hlsPlayer.seekTo(Math.max(0, position));
-        hlsPlayer.setPlayWhenReady(wantPlay); hlsPlayer.prepare();
+        MediaItem.Builder media=new MediaItem.Builder().setUri(source.url);
+        if(hls)media.setMimeType(MimeTypes.APPLICATION_M3U8);
+        opened.setMediaItem(media.build());opened.seekTo(Math.max(0,position));
+        opened.setPlayWhenReady(wantPlay);opened.prepare();
     }
     private void fit(int width, int height) {
         if (width <= 0 || height <= 0) return;
@@ -170,84 +135,36 @@ final class NativePlayback implements AutoCloseable {
     float speed(){return speed;}
     int aspectMode(){return aspectMode;}
     void setAspectMode(int mode){aspectMode=mode;new Library(activity).prefs.edit().putInt("video-aspect",mode).apply();fit(videoWidth,videoHeight);}
-    void setSpeed(float value){
-        speed=value;new Library(activity).prefs.edit().putFloat("playback-speed",speed).apply();
-        if(hlsPlayer!=null)hlsPlayer.setPlaybackSpeed(speed);
-        else if(nativePlayer!=null && ready && playing())applyNativeSpeed();
+    void setSpeed(float value){speed=value;new Library(activity).prefs.edit().putFloat("playback-speed",speed).apply();if(player!=null)player.setPlaybackSpeed(speed);}
+    boolean prepared(){return ready;}
+    boolean wantsPlay(){return wantPlay;}
+    String engineName(){return "Media3";}
+    String videoResolution(){
+        if(player==null)return "";
+        androidx.media3.common.VideoSize size=player.getVideoSize();
+        return size.width>0 && size.height>0?size.width+"×"+size.height:"";
     }
-    private boolean applyNativeSpeed(){
-        if(speed==nativeSpeed)return true;
-        try{nativePlayer.setPlaybackParams(new PlaybackParams().setPitch(1f).setSpeed(speed));nativeSpeed=speed;}
-        catch(IllegalArgumentException unsupported){
-            speed=nativeSpeed;new Library(activity).prefs.edit().putFloat("playback-speed",speed).apply();
-            android.widget.Toast.makeText(activity,"设备不支持此倍速，已保留原速度",android.widget.Toast.LENGTH_SHORT).show();
-        }
-        catch(IllegalStateException invalidState){
-            ready=false;wantPlay=false;
-            listener.error("播放器状态已失效，请重试或切换线路");return false;
-        }
-        return true;
+    boolean videoRendered(){return rendered;}
+    int audioTracks(){
+        int count=0;
+        if(player!=null)for(androidx.media3.common.Tracks.Group group:player.getCurrentTracks().getGroups())
+            if(group.getType()==C.TRACK_TYPE_AUDIO)count+=group.length;
+        return count;
     }
-    boolean prepared() { return ready; }
-    boolean wantsPlay() { return wantPlay; }
-    String engineName() { return hlsPlayer != null ? "Media3" : "NuPlayer"; }
-    boolean videoRendered() { return rendered; }
-    int audioTracks() {
-        if (nativePlayer != null && ready) {
-            int count = 0;
-            for (MediaPlayer.TrackInfo info : nativePlayer.getTrackInfo()) if (info.getTrackType() == MediaPlayer.TrackInfo.MEDIA_TRACK_TYPE_AUDIO) count++;
-            return count;
-        }
-        if (hlsPlayer != null) {
-            int count = 0;
-            for (androidx.media3.common.Tracks.Group group : hlsPlayer.getCurrentTracks().getGroups())
-                if (group.getType() == androidx.media3.common.C.TRACK_TYPE_AUDIO) count += group.length;
-            return count;
-        }
-        return 0;
+    boolean playing(){return player!=null && player.isPlaying();}
+    long position(){return player==null?0:Math.max(0,player.getCurrentPosition());}
+    long duration(){return player==null?0:Math.max(0,player.getDuration());}
+    void play(){wantPlay=true;if(player!=null)player.play();listener.changed();}
+    void pause(){wantPlay=false;if(player!=null)player.pause();listener.changed();}
+    void seek(long position){
+        long length=duration();long target=Math.max(0,length>0?Math.min(length-500,position):position);
+        if(player!=null)player.seekTo(target);listener.changed();
     }
-    boolean playing() {
-        if (hlsPlayer != null) return hlsPlayer.isPlaying();
-        try { return ready && nativePlayer != null && nativePlayer.isPlaying(); } catch (IllegalStateException e) { return false; }
+    void stop(){
+        generation++;ready=false;rendered=false;wantPlay=false;
+        Call call=probeCall;probeCall=null;if(call!=null)call.cancel();
+        if(probing!=null){probing.cancel(true);probing=null;}
+        if(player!=null){ExoPlayer old=player;player=null;old.release();}
     }
-    long position() {
-        if (hlsPlayer != null) return Math.max(0, hlsPlayer.getCurrentPosition());
-        try { return ready && nativePlayer != null ? Math.max(0, nativePlayer.getCurrentPosition()) : 0; } catch (IllegalStateException e) { return 0; }
-    }
-    long duration() {
-        if (hlsPlayer != null) return Math.max(0, hlsPlayer.getDuration());
-        try { return ready && nativePlayer != null ? Math.max(0, nativePlayer.getDuration()) : 0; } catch (IllegalStateException e) { return 0; }
-    }
-    void play() {
-        wantPlay = true;
-        if (hlsPlayer != null) hlsPlayer.play();
-        else if (nativePlayer != null && ready) {
-            focusRequested=true;
-            hasFocus = audio.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
-            if (hasFocus && applyNativeSpeed()) nativePlayer.start();
-        }
-        listener.changed();
-    }
-    void pause() {
-        wantPlay = false; resumeAfterFocus = false;
-        if (hlsPlayer != null) hlsPlayer.pause();
-        else if (nativePlayer != null && ready) nativePlayer.pause();
-        listener.changed();
-    }
-    void seek(long position) {
-        long target = Math.max(0, duration() > 0 ? Math.min(duration() - 500, position) : position);
-        if (hlsPlayer != null) hlsPlayer.seekTo(target);
-        else if (nativePlayer != null && ready) nativePlayer.seekTo(target, MediaPlayer.SEEK_CLOSEST_SYNC);
-        listener.changed();
-    }
-    void stop() {
-        generation++; ready = false; rendered = false;nativeSpeed=1f;
-        if (data != null) { data.close(); data = null; }
-        if (preparing != null) { preparing.cancel(true); preparing = null; }
-        if (nativePlayer != null) { nativePlayer.release(); nativePlayer = null; }
-        if (hlsPlayer != null) { hlsPlayer.release(); hlsPlayer = null; }
-        if (focusRequested) {focusRequested=false;audio.abandonAudioFocusRequest(focus);}
-        hasFocus = false; resumeAfterFocus = false;
-    }
-    @Override public void close() { closed=true;stop(); worker.shutdownNow(); main.removeCallbacksAndMessages(null); }
+    @Override public void close(){closed=true;stop();worker.shutdownNow();main.removeCallbacksAndMessages(null);}
 }

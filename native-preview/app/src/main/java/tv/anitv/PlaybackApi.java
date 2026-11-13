@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import okhttp3.HttpUrl;
 
 final class PlaybackApi implements AutoCloseable {
-    interface Result<T> { void success(T value); void error(String message); default void cached(T value){success(value);} default void progress(String message) {} default void warning(String message) {} }
+    interface Result<T> { void success(T value); void error(String message); default void progress(String message) {} }
     interface Parser<T> { T parse(byte[] bytes) throws IOException; }
     static final class Task {
         private final AtomicBoolean cancelled = new AtomicBoolean();
@@ -54,38 +54,36 @@ final class PlaybackApi implements AutoCloseable {
         String key=url+"|"+session.revision()+"|"+session.available(base)+"|"+cacheEpoch;
         List<Episode> cached=EpisodeCache.get(key);
         if(cached!=null){Task task=new Task();main.post(()->{if(!closed && !task.cancelled.get())result.success(cached);});return task;}
-        Task task=new Task();final boolean[] applied={false},fresh={false},readingCache={false};final String[] deferredError={null};
+        Task task=new Task();
         okhttp3.Request request=new okhttp3.Request.Builder().url(url).tag(CatalogRepository.CacheScope.class,
                 new CatalogRepository.CacheScope(session.revision()+":"+session.available(base)+":"+diskRevision)).build();
-        task.job=repository.request(request,true,new CatalogRepository.Listener(){
+        class EpisodesResult implements CatalogRepository.Listener {
             long cachedUntil;
+            boolean active(){return !closed && !task.cancelled.get();}
             public void loadedCache(byte[] bytes,long remaining){cachedUntil=android.os.SystemClock.elapsedRealtime()+remaining;loaded(bytes,true);}
             public void loaded(byte[] bytes,boolean stored){
-                if(closed || task.cancelled.get())return;
-                if(stored)readingCache[0]=true;
-                repository.decode(()->{try{
-                    List<Episode> values=PlaybackCodec.episodes(bytes);
-                    if(values.isEmpty() && stored)throw new IOException("本地剧集为空");
-                    main.post(()->{
-                        if(stored)readingCache[0]=false;
-                        if(closed || task.cancelled.get() || stored && fresh[0])return;
-                        if(values.isEmpty()){if(applied[0])result.warning("更新暂不可用，已保留本地剧集");else result.success(values);return;}
-                        applied[0]=true;
-                        EpisodeCache.put(key,values,cacheEpoch,stored?cachedUntil-android.os.SystemClock.elapsedRealtime():EpisodeCache.TTL_MS);
-                        if(!stored){fresh[0]=true;if(EpisodeCache.epoch()==cacheEpoch)repository.save(request,bytes);result.success(values);}
-                        else{result.cached(values);if(deferredError[0]!=null)result.warning("更新暂不可用，已保留本地剧集");}
-                    });
-                }catch(IOException error){main.post(()->{
-                    if(stored){readingCache[0]=false;if(deferredError[0]!=null && !applied[0] && !fresh[0])failed(deferredError[0]);}
-                    else failed(error.getMessage());
-                });}});
+                if(!active())return;
+                repository.decode(()->{
+                    try{
+                        List<Episode> values=PlaybackCodec.episodes(bytes);
+                        if(stored && values.isEmpty())throw new IOException("本地剧集为空");
+                        main.post(()->{
+                            if(!active())return;
+                            EpisodeCache.put(key,values,cacheEpoch,stored?cachedUntil-android.os.SystemClock.elapsedRealtime():EpisodeCache.TTL_MS);
+                            if(!stored && EpisodeCache.epoch()==cacheEpoch)repository.save(request,bytes);
+                            result.success(values);
+                        });
+                    }catch(IOException error){main.post(()->{
+                        if(!active())return;
+                        if(stored)task.job=repository.request(request,false,this);
+                        else result.error(error.getMessage());
+                    });}
+                });
             }
-            public void failed(String error){
-                if(closed || task.cancelled.get())return;
-                if(!applied[0] && readingCache[0]){deferredError[0]=error;return;}
-                if(applied[0])result.warning("更新暂不可用，已保留本地剧集");else result.error(error);
-            }
-        });
+            public void failed(String error){if(active())result.error(error);}
+        }
+        // Fresh disk metadata is authoritative for its remaining TTL, as is the memory cache.
+        task.job=repository.request(request,true,false,new EpisodesResult());
         if(task.cancelled.get())task.job.cancel();return task;
     }
 

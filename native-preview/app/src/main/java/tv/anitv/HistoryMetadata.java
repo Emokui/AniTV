@@ -72,7 +72,7 @@ final class HistoryMetadata implements AutoCloseable {
             String image=row.optString("image","");JSONObject images=row.optJSONObject("images");
             if(image.isEmpty() && images!=null)image=images.optString("common",images.optString("large",""));
             if(!image.isEmpty())try{image=PlaySource.networkUrl(image);}catch(IOException invalid){image="";}
-            return new PlaybackHistory.Entry(new Show(source.show.id,title,image,source.show.subtitle),source.endpoint,MetadataTitles.read(row,title));
+            return new PlaybackHistory.Entry(new Show(source.show.id,title,image,source.show.subtitle,source.show.r18 || ContentVisibility.marked(row)),source.endpoint,MetadataTitles.read(row,title));
         }catch(org.json.JSONException error){throw new IOException("历史详情格式不匹配",error);}
     }
     @Override public void close(){closed=true;pending.clear();repository.close();main.removeCallbacksAndMessages(null);}

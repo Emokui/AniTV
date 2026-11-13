@@ -60,7 +60,11 @@ public class RequestReuseTest {
         EpisodeCache.clear();AtomicInteger calls=new AtomicInteger();http(chain->{calls.incrementAndGet();return response(chain.request(),"[\"第1集\"]");});
         for(int round=0;round<4;round++){
             if(round==2)new AccountSession(RuntimeEnvironment.getApplication()).clear();
-            if(round==3)org.robolectric.shadows.ShadowSystemClock.advanceBy(Duration.ofMillis(EpisodeCache.TTL_MS));
+            if(round==3){
+                org.robolectric.shadows.ShadowSystemClock.advanceBy(Duration.ofMillis(EpisodeCache.TTL_MS));
+                java.io.File dir=new java.io.File(RuntimeEnvironment.getApplication().getCacheDir(),"episode-metadata");
+                java.io.File[] files=dir.listFiles();if(files!=null)for(java.io.File file:files)file.setLastModified(System.currentTimeMillis()-EpisodeCache.TTL_MS-1000);
+            }
             try(PlaybackApi api=new PlaybackApi(RuntimeEnvironment.getApplication())){AtomicReference<List<Episode>> values=new AtomicReference<>();api.episodes(42,"测试番剧",result(values));await(()->values.get()!=null);assertEquals(round<2?1:round,calls.get());}
         }
         try(PlaybackApi api=new PlaybackApi(RuntimeEnvironment.getApplication())){AtomicReference<List<Episode>> values=new AtomicReference<>();PlaybackApi.Task task=api.episodes(42,"测试番剧",result(values));task.cancel();Shadows.shadowOf(Looper.getMainLooper()).idle();assertNull(values.get());assertEquals(3,calls.get());}

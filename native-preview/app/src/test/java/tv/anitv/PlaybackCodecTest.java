@@ -7,10 +7,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
-import okhttp3.OkHttpClient;
-import okhttp3.mockwebserver.MockResponse;
-import okhttp3.mockwebserver.MockWebServer;
-import okio.Buffer;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
@@ -46,24 +42,5 @@ public class PlaybackCodecTest {
     }
     @Test public void malformedEpisodeCannotBecomeEmptySuccess() {
         assertThrows(IOException.class, () -> PlaybackCodec.episodes("{\"error\":true}".getBytes(StandardCharsets.UTF_8)));
-    }
-    @Test public void rangeReadsAreCorrectAndReusedWithinBlock() throws Exception {
-        try (MockWebServer server = new MockWebServer()) {
-            byte[] body = new byte[2048]; for (int i = 0; i < body.length; i++) body[i] = (byte) i;
-            server.enqueue(new MockResponse().setResponseCode(206).setHeader("Content-Range", "bytes 0-2047/2048").setBody(new Buffer().write(body)));
-            RangeMediaSource source = new RangeMediaSource(new OkHttpClient(), new PlaySource(server.url("/movie.mp4").toString(), "", "", java.util.Collections.emptyMap()));
-            byte[] target = new byte[16]; assertEquals(16, source.readAt(100, target, 0, 16));
-            assertEquals(100, target[0] & 255); assertEquals(16, source.readAt(200, target, 0, 16));
-            assertEquals(2048, source.getSize()); assertEquals(1, server.getRequestCount());
-            assertEquals(-1, source.readAt(2048, target, 0, 16)); source.close();
-            assertThrows(IOException.class, () -> source.readAt(0, target, 0, 16));
-        }
-    }
-    @Test public void wrongRangeOffsetIsRejectedInsteadOfCorruptingPlayback() throws Exception {
-        try (MockWebServer server = new MockWebServer()) {
-            server.enqueue(new MockResponse().setResponseCode(206).setHeader("Content-Range", "bytes 20-29/30").setBody("1234567890"));
-            RangeMediaSource source = new RangeMediaSource(new OkHttpClient(), new PlaySource(server.url("/movie.mp4").toString(), "", "", java.util.Collections.emptyMap()));
-            assertThrows(IOException.class, () -> source.readAt(0, new byte[4], 0, 4)); source.close();
-        }
     }
 }

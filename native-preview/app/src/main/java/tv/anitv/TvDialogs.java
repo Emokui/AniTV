@@ -23,7 +23,7 @@ final class TvDialogs {
         return new AlertDialog.Builder(activity).setCustomTitle(heading);
     }
     static AlertDialog menu(Activity activity,String title,String[] items,DialogInterface.OnClickListener click) {
-        ArrayAdapter<String> adapter = new ArrayAdapter<String>(activity,android.R.layout.simple_list_item_1,items) {
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(activity,android.R.layout.simple_list_item_1,new java.util.ArrayList<>(java.util.Arrays.asList(items))) {
             @Override public View getView(int position,View recycled,ViewGroup parent) {
                 TextView row = recycled instanceof TextView ? (TextView)recycled : Ui.text(activity,"",14,Ui.TEXT);
                 row.setText(getItem(position));row.setTextColor(Ui.TEXT);row.setTextSize(14);
@@ -46,11 +46,12 @@ final class TvDialogs {
         panel.addView(input,new LinearLayout.LayoutParams(-1,-2));return panel;
     }
     static void show(Activity activity,AlertDialog dialog,boolean side) {
-        dialog.show();style(activity,dialog,side);
+        configureWindow(activity,dialog,side);dialog.show();style(activity,dialog,side);
     }
-    static void style(Activity activity,AlertDialog dialog,boolean side) {
+    static void configureWindow(Activity activity,AlertDialog dialog,boolean side){
         Window window=dialog.getWindow();
         if(window!=null) {
+            window.setWindowAnimations(side?R.style.AniDrawerAnimation:R.style.AniDialogAnimation);
             window.setBackgroundDrawable(Ui.shape(activity,Ui.BG,side?0:12,0));
             window.getDecorView().setPadding(0,0,0,0);
             window.getDecorView().setSystemUiVisibility(activity.getWindow().getDecorView().getSystemUiVisibility());
@@ -59,6 +60,9 @@ final class TvDialogs {
             window.setLayout(side?Math.round(screen*.25f):Math.min(Ui.dp(activity,640),screen-Ui.dp(activity,64)),side?-1:-2);
             WindowManager.LayoutParams params=window.getAttributes();params.dimAmount=.4f;window.setAttributes(params);
         }
+    }
+    static void style(Activity activity,AlertDialog dialog,boolean side) {
+        configureWindow(activity,dialog,side);
         for(int which:new int[]{AlertDialog.BUTTON_POSITIVE,AlertDialog.BUTTON_NEGATIVE,AlertDialog.BUTTON_NEUTRAL}) {
             android.widget.Button button=dialog.getButton(which);if(button==null)continue;
             button.setTextColor(Ui.TEXT);button.setTextSize(13);button.setAllCaps(false);

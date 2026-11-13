@@ -45,7 +45,7 @@ public class HomeRefreshTest {
             home.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_DPAD_RIGHT));
             home.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP,KeyEvent.KEYCODE_DPAD_RIGHT));
             assertEquals("Right on another rail entry must not change section",1,field(home,"section"));
-            assertEquals(before,field(home,"generation"));assertTrue("Focus after Right: " + home.getCurrentFocus(),rail.get(0).hasFocus());
+            assertEquals(before,field(home,"generation"));assertTrue(((View)field(home,"typeButton")).hasFocus());
             rail.get(0).performClick();assertEquals(View.GONE,((View)field(home,"filters")).getVisibility());
             rail.get(0).requestFocus();Shadows.shadowOf(home).setCurrentFocus(rail.get(0));before=(Integer)field(home,"generation");
             home.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_DPAD_RIGHT));
@@ -81,7 +81,7 @@ public class HomeRefreshTest {
             HomeActivity home=controller.get();List<View> rail=(List<View>)field(home,"rail");
             rail.get(HomeActivity.SETTINGS).performClick();Shadows.shadowOf(Looper.getMainLooper()).idle();
             android.app.AlertDialog settings=(android.app.AlertDialog)field(home,"activeDialog");
-            assertNotNull(settings);assertTrue(settings.isShowing());assertEquals(6,settings.getListView().getCount());
+            assertNotNull(settings);assertTrue(settings.isShowing());assertEquals(7,settings.getListView().getCount());
             for(int i=0;i<settings.getListView().getCount();i++) {
                 String label=settings.getListView().getAdapter().getItem(i).toString();
                 assertFalse(label.contains("演示"));assertFalse(label.contains("原版"));
@@ -95,11 +95,21 @@ public class HomeRefreshTest {
             Shadows.shadowOf(Looper.getMainLooper()).idle();assertFalse(settings.isShowing());assertFalse(home.isFinishing());
             rail.get(HomeActivity.SEARCH).performClick();Shadows.shadowOf(Looper.getMainLooper()).idle();
             android.app.AlertDialog search=(android.app.AlertDialog)field(home,"activeDialog");assertTrue(search.isShowing());
-            android.widget.EditText input=edit(search.getWindow().getDecorView());assertNotNull(input);input.setText("测试");
+            android.widget.EditText input=edit(search.getWindow().getDecorView());assertNotNull(input);assertEquals("",input.getHint().toString());assertEquals("",input.getText().toString());input.setText("测试");
             search.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick();Shadows.shadowOf(Looper.getMainLooper()).idle();
             assertEquals(HomeActivity.SEARCH,field(home,"section"));assertEquals("测试",field(home,"keyword"));
             int before=(Integer)field(home,"generation");rail.get(HomeActivity.SEARCH).performClick();
-            assertEquals(before+1,field(home,"generation"));assertEquals("测试",field(home,"keyword"));
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+            android.app.AlertDialog second=(android.app.AlertDialog)field(home,"activeDialog");
+            assertNotNull(second);assertTrue(second.isShowing());assertNotSame(search,second);
+            assertEquals(before,field(home,"generation"));assertEquals("",edit(second.getWindow().getDecorView()).getText().toString());
+            edit(second.getWindow().getDecorView()).setText("取消的输入");second.getButton(android.app.AlertDialog.BUTTON_NEGATIVE).performClick();
+            Shadows.shadowOf(Looper.getMainLooper()).idle();assertEquals("测试",field(home,"keyword"));assertEquals(before,field(home,"generation"));
+            rail.get(HomeActivity.SEARCH).performClick();Shadows.shadowOf(Looper.getMainLooper()).idle();
+            android.app.AlertDialog third=(android.app.AlertDialog)field(home,"activeDialog");assertEquals("",edit(third.getWindow().getDecorView()).getText().toString());
+            edit(third.getWindow().getDecorView()).setText("新番");third.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick();
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+            assertEquals("新番",field(home,"keyword"));assertEquals(HomeActivity.SEARCH,field(home,"section"));
         }
     }
     private android.widget.EditText edit(View view) {

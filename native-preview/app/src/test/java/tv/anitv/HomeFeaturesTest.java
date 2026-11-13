@@ -91,7 +91,35 @@ public class HomeFeaturesTest {
             ((AlertDialog)field(home,"activeDialog")).getListView().performItemClick(null,4,4);
             await(()->{try{AlertDialog d=(AlertDialog)field(home,"activeDialog");return d!=null && d.getListView()!=null && d.getListView().getCount()==5;}catch(Exception error){throw new AssertionError(error);}});
             AlertDialog cache=(AlertDialog)field(home,"activeDialog");cache.getListView().performItemClick(null,CacheManager.METADATA,CacheManager.METADATA);idle();
-            assertNull(field(home,"activeDialog"));await(()->!marker.exists());
+            assertNotNull(field(home,"activeDialog"));assertEquals(7,((AlertDialog)field(home,"activeDialog")).getListView().getCount());await(()->!marker.exists());
+        }
+    }
+
+    @Test public void rightFromAnotherSidebarFocusEntersDisplayedGridWithoutSelectingHoveredSection()throws Exception{
+        try(ActivityController<HomeActivity> controller=Robolectric.buildActivity(HomeActivity.class,new Intent(RuntimeEnvironment.getApplication(),HomeActivity.class).putExtra("demo",true)).setup().visible().windowFocusChanged(true)){
+            HomeActivity home=controller.get();List<View> rail=(List<View>)field(home,"rail");rail.get(0).performClick();
+            await(()->adapter(home).getItemCount()>0);layout(home);int generation=(Integer)field(home,"generation");
+            rail.get(HomeActivity.SEARCH).requestFocus();Shadows.shadowOf(home).setCurrentFocus(rail.get(HomeActivity.SEARCH));
+            home.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_DPAD_RIGHT));
+            home.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP,KeyEvent.KEYCODE_DPAD_RIGHT));
+            for(int i=0;i<5;i++){layout(home);Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(20));}
+            assertEquals(0,field(home,"section"));assertEquals(generation,field(home,"generation"));assertNull(field(home,"activeDialog"));
+            assertTrue(((RecyclerView)field(home,"grid")).hasFocus());
+        }
+    }
+
+    @Test public void topRowUpKeepsCardFocusAndBackStillReturnsToSidebar()throws Exception{
+        try(ActivityController<HomeActivity> controller=Robolectric.buildActivity(HomeActivity.class,new Intent(RuntimeEnvironment.getApplication(),HomeActivity.class).putExtra("demo",true)).setup().visible().windowFocusChanged(true)){
+            HomeActivity home=controller.get();List<View> rail=(List<View>)field(home,"rail");rail.get(0).performClick();
+            await(()->adapter(home).getItemCount()>0);layout(home);RecyclerView grid=(RecyclerView)field(home,"grid");
+            int count=Math.min(((androidx.recyclerview.widget.GridLayoutManager)grid.getLayoutManager()).getSpanCount(),adapter(home).getItemCount());
+            for(int i=0;i<count;i++){
+                layout(home);View card=grid.findViewHolderForAdapterPosition(i).itemView;card.requestFocus();Shadows.shadowOf(home).setCurrentFocus(card);
+                home.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_DPAD_UP));
+                home.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP,KeyEvent.KEYCODE_DPAD_UP));layout(home);
+                assertTrue("Up at the top must keep the same card",card.hasFocus());assertFalse(rail.get(0).hasFocus());
+            }
+            home.onBackPressed();assertTrue(rail.get(0).hasFocus());assertFalse(home.isFinishing());
         }
     }
 

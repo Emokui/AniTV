@@ -40,7 +40,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     private SurfaceView surface;
     private LinearLayout controls;
     private TextView heading, clock, status, hints, feedback;
-    private final Runnable hideFeedback = () -> feedback.setVisibility(View.GONE);
+    private final Runnable hideFeedback = () -> Ui.hide(feedback);
     private ProgressBar loading, timeline;
     private long showId, resumePosition, lastSeek, pendingSeek = -1, lastSave;
     private String showTitle, directUrl, historyKey, episodeTitle;
@@ -66,7 +66,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         }
     };
     @Override public void onCreate(Bundle state) {
-        super.onCreate(state); Ui.fullscreen(this);
+        super.onCreate(state);overridePendingTransition(0,0); Ui.fullscreen(this);
         showId = getIntent().getLongExtra("showId", 0);
         showTitle = getIntent().getStringExtra("title"); if (showTitle == null) showTitle = "视频播放";
         playbackTitles = getIntent().getStringArrayExtra("playbackTitles");
@@ -100,18 +100,19 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         surface = new SurfaceView(this); surface.getHolder().addCallback(this);
         frame.addView(surface, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
         LinearLayout center = new LinearLayout(this); center.setOrientation(LinearLayout.VERTICAL); center.setGravity(Gravity.CENTER);
-        center.setPadding(dp(24), dp(16), dp(24), dp(16));
+        center.setPadding(dp(24), dp(16), dp(24), dp(16));center.setBackground(Ui.shape(this,0xdd17171b,28,0));
         loading = new ProgressBar(this); center.addView(loading, new LinearLayout.LayoutParams(dp(32), dp(32)));
         status = Ui.text(this, "正在打开视频…", 16, Ui.TEXT); status.setGravity(Gravity.CENTER); status.setMaxWidth(dp(620));
         status.setShadowLayer(3, 1, 1, Color.BLACK);
         LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-2, -2); sp.topMargin = dp(15); center.addView(status, sp);
-        frame.addView(center, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
+        frame.addView(center, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+        status.addTextChangedListener(new android.text.TextWatcher(){public void beforeTextChanged(CharSequence s,int start,int count,int after){}public void onTextChanged(CharSequence s,int start,int before,int count){if(sp.topMargin!=(loading.getVisibility()==View.VISIBLE?dp(15):0)){sp.topMargin=loading.getVisibility()==View.VISIBLE?dp(15):0;status.setLayoutParams(sp);}center.setVisibility(s.length()==0 && loading.getVisibility()!=View.VISIBLE?View.GONE:View.VISIBLE);}public void afterTextChanged(android.text.Editable e){}});
         controls = new LinearLayout(this); controls.setOrientation(LinearLayout.VERTICAL); controls.setPadding(dp(32), dp(20), dp(32), dp(18));
-        controls.setBackgroundColor(0xdd17171b);
+        controls.setBackground(Ui.gradient(0x6617171b,0xee17171b));
         controls.setVisibility(desiredPlaying ? View.GONE : View.VISIBLE);
         heading = Ui.text(this, showTitle, 19, Ui.TEXT); Ui.bold(heading); heading.setMaxLines(1); controls.addView(heading);
         LinearLayout progress = new LinearLayout(this); progress.setGravity(Gravity.CENTER_VERTICAL);
-        timeline = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal); timeline.setMax(10000);
+        timeline = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal); timeline.setMax(10000);timeline.setProgressDrawable(Ui.timeline(this));timeline.setPadding(0,dp(6),0,dp(6));
         progress.addView(timeline, new LinearLayout.LayoutParams(0, dp(18), 1));
         clock = Ui.text(this, "00:00 / 00:00", 12, Ui.TEXT);
         LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-2, -2); cp.leftMargin = dp(20); progress.addView(clock, cp);
@@ -127,10 +128,10 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         frame.setFocusableInTouchMode(true); frame.requestFocus();
     }
     private void feedback(String text,long duration) {
-        main.removeCallbacks(hideFeedback);feedback.setText(text);feedback.setVisibility(View.VISIBLE);
+        main.removeCallbacks(hideFeedback);feedback.setText(text);Ui.reveal(feedback,100,0);
         main.postDelayed(hideFeedback,duration);
     }
-    private void clearFeedback() { main.removeCallbacks(hideFeedback);feedback.setVisibility(View.GONE); }
+    private void clearFeedback() { main.removeCallbacks(hideFeedback);Ui.hide(feedback); }
     private void loadEpisodes() {
         if(episodesLoading || destroyed)return;episodesLoading=true;
         if (episodeTask != null) episodeTask.cancel();
@@ -151,7 +152,6 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         loading.setVisibility(View.VISIBLE); status.setText("正在读取播放线路…");
         sourceTask = api.sources(showId, playbackTitles, selectedEpisode(), new PlaybackApi.Result<List<PlaySource>>() {
             @Override public void progress(String message) { if (!destroyed && token == sourceGeneration) status.setText(message); }
-            @Override public void warning(String message) { if (!destroyed && token == sourceGeneration) Toast.makeText(PlayerActivity.this,message,Toast.LENGTH_LONG).show(); }
             @Override public void success(List<PlaySource> values) {
                 if (destroyed || token != sourceGeneration) return;
                 sources = values;
@@ -181,7 +181,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         if(historyRecorded || showId<=0)return;
         historyRecorded=true;
         String image=getIntent().getStringExtra("image"),subtitle=getIntent().getStringExtra("subtitle");
-        history.remember(new Show(showId,showTitle,image==null?"":image,subtitle==null?"":subtitle),
+        history.remember(new Show(showId,showTitle,image==null?"":image,subtitle==null?"":subtitle,getIntent().getBooleanExtra("r18",false)),
                 new Library(this).endpoint(),playbackTitles);
     }
     private void update() {
@@ -209,7 +209,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     }
     private void syncControls() {
         backExitArmed = false;
-        controls.setVisibility(!desiredPlaying && !dialogOpen && !failed && !finished ? View.VISIBLE : View.GONE);
+        if(!desiredPlaying && !dialogOpen && !failed && !finished)Ui.reveal(controls,130,8);else Ui.hide(controls);
         update();
         // Input and engine events update immediately; only visible progress needs frequent polling.
         if (started && !destroyed) {
@@ -247,11 +247,11 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         if (dialog != null && dialog.isShowing()) return;
         if (episodes.isEmpty()) { loadEpisodes(); Toast.makeText(this, "正在重试读取剧集，请稍后按上键", Toast.LENGTH_SHORT).show(); return; }
         final List<Episode> choices=new ArrayList<>(episodes);
-        boolean resume = desiredPlaying; engine.pause(); dialogOpen = true;
+        boolean resume = desiredPlaying && !failed && !finished; engine.pause(); dialogOpen = true;
         int checked = 0;
         for (int i = 0; i < choices.size(); i++) if (choices.get(i).number == number) checked = i;
         final boolean[] changed = {false};
-        dialog = EpisodePicker.create(this, showTitle, choices, checked, index -> {
+        dialog = EpisodePicker.create(this, showTitle, historyKey, choices, checked,true,"当前播放", index -> {
             int next = choices.get(index).number;
             if (next != number) { changed[0] = true; changeEpisode(next); }
         });
@@ -260,9 +260,9 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     private void sourceMenu() {
         if (dialog != null && dialog.isShowing()) return;
         if (sources.isEmpty()) { Toast.makeText(this, "暂无可用线路，确认键重试", Toast.LENGTH_SHORT).show(); return; }
-        boolean resume = desiredPlaying; engine.pause(); dialogOpen = true;
+        boolean resume = desiredPlaying && !failed && !finished; engine.pause(); dialogOpen = true;
         final boolean[] changed = {false};
-        dialog = SourcePicker.create(this, sources, sourceIndex, index -> {
+        dialog = SourcePicker.create(this, sources, sourceIndex, engine.videoResolution(), index -> {
             sourcePreference.remember(sources.get(index));
             if (index != sourceIndex || failed) {
                 changed[0] = true; save(); sourceIndex = index; desiredPlaying = true; prepare();
@@ -272,28 +272,16 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     }
     private void playbackMenu() {
         if(dialog!=null && dialog.isShowing())return;
-        boolean resume=desiredPlaying;engine.pause();dialogOpen=true;
-        float[] speeds={1f,1.25f,1.5f,2f};String[] modes={"适应画面","裁剪铺满","拉伸全屏"};
-        String[] items=new String[speeds.length+modes.length];
-        for(int i=0;i<speeds.length;i++)items[i]=(engine.speed()==speeds[i]?"✓ ":"")+"速度 · "+speeds[i]+"×";
-        for(int i=0;i<modes.length;i++)items[speeds.length+i]=(engine.aspectMode()==i?"✓ ":"")+"比例 · "+modes[i];
+        boolean resume=desiredPlaying && !failed && !finished;engine.pause();dialogOpen=true;
+        float[] speeds={1f,1.25f,1.5f,2f};
         int initial=playbackMenuPosition;
         if(initial<0){initial=0;for(int i=0;i<speeds.length;i++)if(engine.speed()==speeds[i])initial=i;}
-        final int selected=initial;
-        dialog=TvDialogs.menu(this,"播放设置 · 返回关闭",items,(d,index)->{
+        final boolean[] changed={false};
+        dialog=PlayerDrawer.settings(this,engine.speed(),engine.aspectMode(),initial,index->{
             playbackMenuPosition=index;
-            if(index<speeds.length)engine.setSpeed(speeds[index]);else engine.setAspectMode(index-speeds.length);
-        });
-        final AlertDialog opened=dialog;
-        opened.setOnShowListener(ignored->{
-            TvDialogs.style(this,opened,true);
-            android.widget.ListView list=opened.getListView();list.setSelection(selected);
-            list.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
-                @Override public void onItemSelected(android.widget.AdapterView<?> parent,View view,int position,long id){playbackMenuPosition=position;}
-                @Override public void onNothingSelected(android.widget.AdapterView<?> parent){}
-            });
-        });
-        showPlayerDialog(resume,new boolean[]{false});
+            if(index<speeds.length)engine.setSpeed(speeds[index]);else if(index<7)engine.setAspectMode(index-speeds.length);else if(nextEpisode(index==7?-1:1))changed[0]=true;else Toast.makeText(this,index==7?"没有上一集":"没有下一集",Toast.LENGTH_SHORT).show();
+        },position->playbackMenuPosition=position);
+        showPlayerDialog(resume,changed);
     }
     private void showPlayerDialog(boolean resume, boolean[] changed) {
         clearFeedback();
@@ -311,7 +299,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
             if (dialog == opened) { dialog = null; dialogOpen = false; }
             backKeyDown = false; backExitArmed = false;
             if (!destroyed && started) {
-                if (!changed[0] && resume) engine.play();
+                if (!changed[0] && resume && !failed && !finished) engine.play();
                 syncControls();
             }
         });
@@ -321,7 +309,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         if (dialog != null && dialog.isShowing()) { dialog.cancel(); return; }
         long now = SystemClock.elapsedRealtime();
         if (!backExitArmed || now - backExitAt > BACK_EXIT_WINDOW_MS) {
-            controls.setVisibility(View.GONE);
+            Ui.hide(controls);
             backExitArmed = true; backExitAt = now;
             feedback("5 秒内再次返回退出播放",2000);
         } else { save(); finish(); }
@@ -366,7 +354,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
             else if (key == KeyEvent.KEYCODE_MENU) playbackMenu();
             else if (key == KeyEvent.KEYCODE_MEDIA_NEXT) nextEpisode(1);
             else if (key == KeyEvent.KEYCODE_MEDIA_PREVIOUS) nextEpisode(-1);
-            else if (key == KeyEvent.KEYCODE_MEDIA_PLAY) { desiredPlaying = true; engine.play(); syncControls(); }
+            else if (key == KeyEvent.KEYCODE_MEDIA_PLAY) { if(failed || finished)toggle();else{desiredPlaying = true; engine.play(); syncControls();} }
             else if (key == KeyEvent.KEYCODE_MEDIA_PAUSE) { desiredPlaying = false; engine.pause(); syncControls(); }
             else toggle();
         }
@@ -405,9 +393,11 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         save(); super.onSaveInstanceState(state); state.putInt("episode", number); state.putString("episodeTitle", selectedEpisode().named ? selectedEpisode().title : ""); state.putInt("source", sourceIndex);
         state.putLong("position", resumePosition); state.putBoolean("playing", desiredPlaying);
     }
+    @Override public void finish(){super.finish();overridePendingTransition(0,0);}
     @Override protected void onDestroy() {
         destroyed = true; if (episodeTask != null) episodeTask.cancel(); if (sourceTask != null) sourceTask.cancel();
         if (dialog != null) { dialog.setOnDismissListener(null); dialog.dismiss(); }
+        controls.animate().cancel();feedback.animate().cancel();
         api.close(); engine.close(); unregisterReceiver(noisy); main.removeCallbacksAndMessages(null); super.onDestroy();
     }
 }

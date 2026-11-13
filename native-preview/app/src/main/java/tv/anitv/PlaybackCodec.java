@@ -18,6 +18,7 @@ import org.json.JSONTokener;
 /** AniCh's public episode/vod wire schemas, with explicit JSON counterparts. */
 public final class PlaybackCodec {
     private PlaybackCodec() {}
+    private static final java.util.regex.Pattern EPISODE_NUMBER=java.util.regex.Pattern.compile("^第?0*(\\d+)(?:集|话|話)$");
     private static boolean json(byte[] bytes) throws IOException {
         if (bytes.length > CatalogCodec.MAX_BYTES) throw new IOException("播放数据过大");
         for (byte b : bytes) if (!Character.isWhitespace((char) b)) return b == '{' || b == '[';
@@ -42,7 +43,7 @@ public final class PlaybackCodec {
                 if (value instanceof String) {
                     String title = ((String) value).trim();
                     if (title.isEmpty()) continue;
-                    java.util.regex.Matcher match = java.util.regex.Pattern.compile("^第?0*(\\d+)(?:集|话|話)$").matcher(title);
+                    java.util.regex.Matcher match = EPISODE_NUMBER.matcher(title);
                     int number;
                     if (match.matches()) {
                         try { number = Integer.parseInt(match.group(1)); }
@@ -60,7 +61,7 @@ public final class PlaybackCodec {
                 int number = o.optInt("sort", -1);
                 if (number < 0) throw new IOException("剧集编号无效");
                 result.put(number, new Episode(number, o.optString("title"), false, o.optString("image"),
-                        o.optInt("duration"), o.has("status") ? o.optBoolean("status") : null));
+                        o.optInt("duration"), o.optBoolean("status")));
             }
         } else {
             CodedInputStream input = CodedInputStream.newInstance(bytes);
@@ -68,7 +69,7 @@ public final class PlaybackCodec {
                 int tag = input.readTag();
                 if (tag != 10) { if (!input.skipField(tag)) throw new IOException("剧集列表字段无效"); continue; }
                 CodedInputStream item = CodedInputStream.newInstance(input.readByteArray());
-                int number = -1, duration = 0; String title = "", image = ""; Boolean available = null;
+                int number = -1, duration = 0; String title = "", image = ""; Boolean available = false;
                 while (!item.isAtEnd()) {
                     int field = item.readTag();
                     if (field == 8) available = item.readBool();

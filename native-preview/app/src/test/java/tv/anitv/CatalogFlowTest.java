@@ -69,7 +69,7 @@ public class CatalogFlowTest {
         try (ActivityController<DetailActivity> detail = Robolectric.buildActivity(DetailActivity.class, detailIntent).setup().visible().windowFocusChanged(true)) {
             View root = detail.get().getWindow().getDecorView(); layout(root);
             assertNull(find(root,"打开原 AniTV 首页"));
-            await(() -> find(root, "真实字段的简介") != null && find(root, "2 集 · 原生播放 · 上键选集 / 下键换源") != null);
+            await(() -> find(root, "真实字段的简介") != null && find(root, "共 2 集") != null);
             assertEquals("测试番剧", episodeRequest.get());
             View play = find(root, "选集播放"); assertNotNull(play); play.performClick();
             AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog(); assertNotNull(dialog);

@@ -11,7 +11,7 @@ public final class PageAccumulator {
     private final List<Frame> frames = new ArrayList<>();
     private final List<Long> previous = new ArrayList<>();
     private boolean windowed, ended;
-    private long cursor,offset;
+    private long cursor,offset,hiddenAdultOffset;
     private static final class Frame implements java.io.Serializable {
         private static final long serialVersionUID=1L;
         final long request, next; final boolean ended; final List<Show> shows;
@@ -22,13 +22,13 @@ public final class PageAccumulator {
     static final class State implements java.io.Serializable {
         private static final long serialVersionUID=1L;
         final List<Frame> frames;final List<Long> previous;final List<Show> values;
-        final boolean windowed,ended;final long cursor,offset;
-        State(PageAccumulator pages){frames=new ArrayList<>(pages.frames);previous=new ArrayList<>(pages.previous);values=pages.snapshot();windowed=pages.windowed;ended=pages.ended;cursor=pages.cursor;offset=pages.offset;}
+        final boolean windowed,ended;final long cursor,offset,hiddenAdultOffset;
+        State(PageAccumulator pages){frames=new ArrayList<>(pages.frames);previous=new ArrayList<>(pages.previous);values=pages.snapshot();windowed=pages.windowed;ended=pages.ended;cursor=pages.cursor;offset=pages.offset;hiddenAdultOffset=pages.hiddenAdultOffset;}
     }
     State save(){return new State(this);}
-    void restore(State state){reset();windowed=state.windowed;ended=state.ended;cursor=state.cursor;offset=state.offset;frames.addAll(state.frames);previous.addAll(state.previous);for(Show show:state.values)items.put(show.id,show);}
+    void restore(State state){reset();windowed=state.windowed;ended=state.ended;cursor=state.cursor;offset=state.offset;hiddenAdultOffset=state.hiddenAdultOffset;frames.addAll(state.frames);previous.addAll(state.previous);for(Show show:state.values)items.put(show.id,show);}
     public void windowed(boolean enabled) { windowed=enabled; }
-    public void reset() { items.clear();frames.clear();previous.clear();cursor=0;offset=0;ended=false; }
+    public void reset() { items.clear();frames.clear();previous.clear();cursor=0;offset=0;hiddenAdultOffset=0;ended=false; }
     public void append(CatalogCodec.Page page, boolean paginated) {
         long request=cursor;
         int oldSize=items.size();
@@ -47,7 +47,7 @@ public final class PageAccumulator {
             rebuild();
             if(!items.isEmpty()){
                 long first=items.keySet().iterator().next();int removed=0;
-                while(removed<merged.size() && merged.get(removed).id!=first)removed++;
+                while(removed<merged.size() && merged.get(removed).id!=first){if(merged.get(removed).r18)hiddenAdultOffset++;removed++;}
                 offset+=removed;
             }
         }
@@ -62,8 +62,8 @@ public final class PageAccumulator {
         if(frames.isEmpty() || next!=frames.get(0).request)throw new java.io.IOException("目录已更新，请在侧栏确认刷新");
         long oldFirst=items.isEmpty()?-1:items.keySet().iterator().next();
         LinkedHashMap<Long,Show> joined=new LinkedHashMap<>();for(Show show:page.shows)joined.put(show.id,show);joined.putAll(items);
-        int added=0;for(Long id:joined.keySet()){if(id==oldFirst)break;added++;}
-        offset=Math.max(0,offset-added);
+        int added=0,adultAdded=0;for(Show show:joined.values()){if(show.id==oldFirst)break;added++;if(show.r18)adultAdded++;}
+        offset=Math.max(0,offset-added);hiddenAdultOffset=Math.max(0,hiddenAdultOffset-adultAdded);
         previous.remove(previous.size()-1);
         frames.add(0,new Frame(request,next,false,page.shows));
         if(frames.size()>WINDOW_PAGES)frames.remove(frames.size()-1);
@@ -74,6 +74,7 @@ public final class PageAccumulator {
         items.clear();for(Frame frame:frames)for(Show show:frame.shows)items.put(show.id,show);
     }
     public long offset(){return offset;}
+    public long offset(boolean showR18){return showR18?offset:Math.max(0,offset-hiddenAdultOffset);}
     public long cursor() { return cursor; }
     public boolean ended() { return ended; }
     public List<Show> snapshot() { return new ArrayList<>(items.values()); }

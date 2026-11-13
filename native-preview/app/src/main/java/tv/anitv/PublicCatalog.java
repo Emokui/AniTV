@@ -50,7 +50,7 @@ final class PublicCatalog {
                 JSONObject images = item.optJSONObject("images");
                 String image = images == null ? "" : images.optString("common", images.optString("large"));
                 String subtitle = item.optString("date", "") + " · " + item.optString("platform", "动画");
-                result.add(new Show(Show.BANGUMI_OFFSET + id, title, image, subtitle));
+                result.add(new Show(Show.BANGUMI_OFFSET + id, title, image, subtitle,ContentVisibility.marked(item)));
             }
             long next = root.getLong("offset") + values.length();
             return new CatalogCodec.Page(result, values.length() == 0 || next >= root.getLong("total") ? -1 : next);

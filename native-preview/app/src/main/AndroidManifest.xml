@@ -7,8 +7,8 @@
         android:icon="@mipmap/ic_launcher" android:banner="@drawable/tv_banner"
         android:theme="@style/AniTheme" android:allowBackup="false"
         android:supportsRtl="true" android:usesCleartextTraffic="true">
-        <activity android:name=".LoginActivity" android:exported="false" android:screenOrientation="landscape" />
-        <activity android:name=".PlayerActivity" android:exported="false"
+        <activity android:windowSoftInputMode="adjustResize" android:name=".LoginActivity" android:exported="false" android:screenOrientation="landscape" />
+        <activity android:theme="@style/AniPlayerTheme" android:name=".PlayerActivity" android:exported="false"
             android:screenOrientation="landscape" />
         <activity android:name=".DetailActivity" android:exported="false"
             android:screenOrientation="landscape" />

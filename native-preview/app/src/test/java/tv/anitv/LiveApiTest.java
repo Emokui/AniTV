@@ -25,7 +25,7 @@ public class LiveApiTest {
             return CatalogRepository.body(response);
         }
     }
-    @Test public void filteredPagesSearchDetailEpisodesSourcesAndMp4Ranges() throws Exception {
+    @Test public void filteredPagesSearchDetailEpisodesSourcesAndMediaConnection() throws Exception {
         Assume.assumeTrue("Explicit live API test only", Boolean.getBoolean("anitv.live"));
         CatalogCodec.Page first = PublicCatalog.decode(fetch(PublicCatalog.search(0, "", "tv", "日本", "2024")));
         assertFalse(first.shows.isEmpty()); assertTrue(first.next > 0);
@@ -43,13 +43,12 @@ public class LiveApiTest {
         assertFalse(episodes.isEmpty()); Episode episode = episodes.stream().filter(e -> e.number == 1).findFirst().orElseThrow(AssertionError::new);
         List<PlaySource> sources = PlaybackCodec.sources(fetch(new Request.Builder().url(PlaybackApi.sourcesUrl(base, show.id, show.title, episode)).build()));
         assertFalse(sources.isEmpty());
-        try (RangeMediaSource source = new RangeMediaSource(http, sources.get(0))) {
-            byte[] head = new byte[32]; assertEquals(32, source.readAt(0, head, 0, head.length));
-            assertEquals("ftyp", new String(head, 4, 4, StandardCharsets.US_ASCII));
-            long size = source.getSize(); assertTrue(size > 1000000);
-            byte[] tail = new byte[1024]; assertEquals(1024, source.readAt(size - 1024, tail, 0, tail.length));
-            System.out.println("LIVE_OK first=" + first.shows.size() + " second=" + second.shows.size() + " search=" + search.shows.size() +
-                    " episodes=" + episodes.size() + " sources=" + sources.size() + " media_bytes=" + size + " tail_seek=ok");
-        }
+        androidx.media3.datasource.HttpDataSource media=NativePlayback.httpDataSource(sources.get(0)).createDataSource();
+        try {
+            media.open(new androidx.media3.datasource.DataSpec.Builder().setUri(sources.get(0).url).setLength(32).build());
+            byte[] head=new byte[32];assertTrue(media.read(head,0,head.length)>0);
+            System.out.println("LIVE_OK first="+first.shows.size()+" second="+second.shows.size()+" search="+search.shows.size()+
+                    " episodes="+episodes.size()+" sources="+sources.size()+" media_connection=ok");
+        } finally {media.close();}
     }
 }

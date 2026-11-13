@@ -43,15 +43,12 @@ public class EpisodePickerDeviceTest {
                 dialog = EpisodePicker.create(a, "遥控器选集测试", episodes, 40, i -> chosen.set(episodes.get(i).number));
                 dialog.show(); grid = dialog.findViewById(android.R.id.content).findViewWithTag("episode-grid");
             });
-            SystemClock.sleep(700); assertEquals(40, position());
-            key(KeyEvent.KEYCODE_DPAD_LEFT); assertEquals(40, position());
-            key(KeyEvent.KEYCODE_DPAD_RIGHT); assertEquals(41, position());
-            key(KeyEvent.KEYCODE_DPAD_DOWN); assertEquals(45, position());
-            for (int i = 0; i < 12; i++) key(KeyEvent.KEYCODE_DPAD_DOWN);
-            assertEquals(77, position());
-            key(KeyEvent.KEYCODE_DPAD_LEFT); assertEquals(76, position());
-            key(KeyEvent.KEYCODE_DPAD_DOWN); assertEquals(80, position());
-            key(KeyEvent.KEYCODE_DPAD_RIGHT); assertEquals(80, position());
+            SystemClock.sleep(700);assertEquals(-1,position());
+            home.onActivity(a->assertTrue(dialog.getWindow().getDecorView().findViewWithTag("episode-order").hasFocus()));
+            key(KeyEvent.KEYCODE_DPAD_RIGHT);key(KeyEvent.KEYCODE_DPAD_RIGHT);key(KeyEvent.KEYCODE_DPAD_CENTER);
+            assertEquals(0,position());
+            for(int i=0;i<12;i++)key(KeyEvent.KEYCODE_DPAD_DOWN);
+            assertEquals(30,position());key(KeyEvent.KEYCODE_DPAD_RIGHT);assertEquals(30,position());
             home.onActivity(a -> {
                 View focused = dialog.getCurrentFocus(); Rect visible = new Rect();
                 assertTrue(focused.getLocalVisibleRect(visible)); assertEquals(focused.getHeight(), visible.height());

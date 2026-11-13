@@ -20,6 +20,10 @@ import org.robolectric.RobolectricTestRunner;
 
 @RunWith(RobolectricTestRunner.class) @Config(sdk=28, application=AniApp.class)
 public class PlayerBackTest {
+    @org.junit.Before public void disablePlatformAnimationsForTimingAssertions(){
+        org.robolectric.util.ReflectionHelpers.callStaticMethod(android.animation.ValueAnimator.class,"setDurationScale",org.robolectric.util.ReflectionHelpers.ClassParameter.from(float.class,0f));
+    }
+
     @Test public void pausedPreparedPlayerDoesNotKeepLoadingSpinnerVisible()throws Exception{
         try(ActivityController<PlayerActivity> controller=player("http://127.0.0.1:1/video")){
             PlayerActivity player=controller.get();key(player,KeyEvent.KEYCODE_MEDIA_PAUSE);player.buffering(true);player.ready();

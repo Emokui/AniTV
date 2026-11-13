@@ -7,6 +7,9 @@ import okhttp3.HttpUrl;
 final class CatalogApi {
     private CatalogApi() {}
     static HttpUrl url(HttpUrl base,int section,long cursor,String keyword,String type,String language,String year) {
+        return url(base,section,cursor,keyword,type,language,year,false);
+    }
+    static HttpUrl url(HttpUrl base,int section,long cursor,String keyword,String type,String language,String year,boolean showR18){
         if(cursor<0 || cursor>=Show.BANGUMI_OFFSET)throw new IllegalArgumentException("目录分页编号无效");
         HttpUrl.Builder url=base.newBuilder().addPathSegment("bangumi")
                 .addPathSegment(section==0?"recommend":section==3?"search":"list");
@@ -16,7 +19,12 @@ final class CatalogApi {
             if(!language.isEmpty())url.addQueryParameter("lang",language);
             if(!year.isEmpty())url.addQueryParameter("year",year);
         }
+        // AniCh sends server filter keys, not its local preference names.
+        if(!showR18)url.addQueryParameter("nsfw","false");
         return url.addQueryParameter("skip",Long.toString(cursor)).build();
+    }
+    static HttpUrl related(HttpUrl base,long id){
+        return base.newBuilder().addPathSegment("bangumi").addPathSegment("related").addPathSegment(Long.toString(id)).build();
     }
     static CatalogCodec.Page decode(byte[] bytes) throws IOException {
         CatalogCodec.Page page=CatalogCodec.decode(bytes);

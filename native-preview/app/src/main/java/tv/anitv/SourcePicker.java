@@ -2,20 +2,11 @@ package tv.anitv;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.graphics.drawable.ColorDrawable;
-import android.text.TextUtils;
-import android.view.Gravity;
 import android.view.KeyEvent;
-import android.widget.ListView;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.Window;
-import android.view.WindowManager;
 import android.widget.ArrayAdapter;
-import android.widget.CheckedTextView;
-import android.widget.LinearLayout;
-import android.widget.Checkable;
-import android.content.res.ColorStateList;
+import android.widget.ListView;
 import android.widget.TextView;
 import java.util.List;
 
@@ -24,6 +15,11 @@ final class SourcePicker {
     interface Selection { void selected(int index); }
     private SourcePicker() {}
     static AlertDialog create(Activity activity, List<PlaySource> sources, int selected, Selection selection) {
+        return create(activity,sources,selected,"",selection);
+    }
+    static AlertDialog create(Activity activity,List<PlaySource> sources,int selected,String currentResolution,Selection selection){
+        String[] resolutions=new String[sources.size()];
+        for(int i=0;i<sources.size();i++)resolutions[i]=i==selected && !currentResolution.isEmpty()?currentResolution:sources.get(i).resolutionLabel();
         SourceLatency probes = new SourceLatency();
         SourceLatency.Result[] results = new SourceLatency.Result[sources.size()];
         java.util.Arrays.fill(results, SourceLatency.Result.pending());
@@ -34,30 +30,23 @@ final class SourcePicker {
             @Override public View getView(int position, View convertView, ViewGroup parent) {
                 SourceRow row = convertView instanceof SourceRow ? (SourceRow) convertView : new SourceRow(activity);
                 row.caption.setText(sources.get(position).caption);
+                row.resolution.setText(resolutions[position]);
                 row.setSelected(position == cursor[0]);
                 row.updateLatency(sources.get(position).caption, results[position]);
                 return row;
             }
         };
-        TextView title = Ui.text(activity, "播放线路 · " + sources.size() + "\n首字节延迟 · 返回关闭", 14, Ui.TEXT);
-        title.setPadding(Ui.dp(activity, 14), Ui.dp(activity, 18), Ui.dp(activity, 14), Ui.dp(activity, 14));
-        AlertDialog dialog = new AlertDialog.Builder(activity).setCustomTitle(title)
+        String current=selected>=0 && selected<sources.size()?"正在使用 · "+sources.get(selected).caption:null;
+        AlertDialog dialog = new AlertDialog.Builder(activity)
+                .setCustomTitle(PlayerDrawer.header(activity,"播放线路",sources.size()+" 条线路 · 首字节响应延迟",current))
                 .setSingleChoiceItems(adapter, selected, (d, index) -> { selection.selected(index); d.dismiss(); }).create();
+        PlayerDrawer.configureWindow(activity,dialog);
         dialog.setOnShowListener(ignored -> {
-            Window window = dialog.getWindow();
-            if (window != null) {
-                window.setBackgroundDrawable(new ColorDrawable(Ui.BG));
-                window.setGravity(Gravity.RIGHT | Gravity.TOP);
-                window.setLayout(Math.round(activity.getResources().getDisplayMetrics().widthPixels * .25f), WindowManager.LayoutParams.MATCH_PARENT);
-                WindowManager.LayoutParams params = window.getAttributes(); params.x = 0; params.y = 0; params.dimAmount = .25f;
-                window.setAttributes(params);
-                window.getDecorView().setPadding(0, 0, 0, 0);
-                window.getDecorView().setSystemUiVisibility(activity.getWindow().getDecorView().getSystemUiVisibility());
-                window.getDecorView().addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
-                    @Override public void onViewAttachedToWindow(View view) { }
-                    @Override public void onViewDetachedFromWindow(View view) { probes.close(); }
-                });
-            }
+            PlayerDrawer.style(activity,dialog,selected);
+            dialog.getWindow().getDecorView().addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+                @Override public void onViewAttachedToWindow(View view) { }
+                @Override public void onViewDetachedFromWindow(View view) { probes.close(); }
+            });
             ListView list = dialog.getListView();
             list.setSelection(selected); list.requestFocus();
             list.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
@@ -69,16 +58,12 @@ final class SourcePicker {
                 @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { }
             });
             list.setOnKeyListener((view, key, event) -> {
-                if (key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_DPAD_DOWN) {
-                    if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                        cursor[0] = Math.max(0, Math.min(sources.size() - 1, cursor[0] + (key == KeyEvent.KEYCODE_DPAD_DOWN ? 1 : -1)));
-                        list.setSelection(cursor[0]);
-                    }
-                    return true;
-                }
+                // Let ListView handle arrows so only its viewport edge scrolls.
                 if (key == KeyEvent.KEYCODE_DPAD_CENTER || key == KeyEvent.KEYCODE_ENTER || key == KeyEvent.KEYCODE_NUMPAD_ENTER) {
-                    if (event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled())
-                        list.performItemClick(list.getChildAt(cursor[0] - list.getFirstVisiblePosition()), cursor[0], cursor[0]);
+                    if (event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled()) {
+                        int position=list.getSelectedItemPosition();
+                        if(position>=0)list.performItemClick(list.getChildAt(position-list.getFirstVisiblePosition()),position,position);
+                    }
                     return true;
                 }
                 return false;
@@ -93,31 +78,24 @@ final class SourcePicker {
         });
         return dialog;
     }
-    private static final class SourceRow extends LinearLayout implements Checkable {
-        final CheckedTextView caption;
-        final TextView latency;
+    private static final class SourceRow extends PlayerDrawer.Option {
+        final TextView caption,latency,resolution;
         SourceRow(Activity activity) {
-            super(activity); setOrientation(VERTICAL); setGravity(Gravity.CENTER_VERTICAL);
-            setDescendantFocusability(FOCUS_BLOCK_DESCENDANTS);
-            setPadding(Ui.dp(activity, 12), Ui.dp(activity, 10), Ui.dp(activity, 12), Ui.dp(activity, 10));
-            setMinimumHeight(Ui.dp(activity, 76)); setBackground(Ui.focusBackground(activity));
-            caption = new CheckedTextView(activity); caption.setTextColor(Ui.TEXT); caption.setTextSize(12);
-            caption.setMaxLines(2); caption.setEllipsize(TextUtils.TruncateAt.END);
-            caption.setCheckMarkDrawable(android.R.drawable.btn_radio);
-            caption.setCheckMarkTintList(new ColorStateList(new int[][]{new int[]{android.R.attr.state_checked},new int[]{}},new int[]{Ui.ACCENT,Ui.MUTED}));
-            addView(caption,new LinearLayout.LayoutParams(-1,-2));
-            latency = Ui.text(activity,"",11,Ui.MUTED);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1,-2); lp.topMargin=Ui.dp(activity,6); addView(latency,lp);
+            super(activity);caption=title;latency=detail;
+            removeView(latency);
+            android.widget.LinearLayout metadata=new android.widget.LinearLayout(activity);
+            metadata.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            resolution=Ui.text(activity,"",11,Ui.TEXT);resolution.setTag("source-resolution");
+            metadata.addView(resolution,new android.widget.LinearLayout.LayoutParams(0,-2,1));
+            metadata.addView(latency,new android.widget.LinearLayout.LayoutParams(-2,-2));
+            android.widget.LinearLayout.LayoutParams mp=new android.widget.LinearLayout.LayoutParams(-1,-2);mp.topMargin=Ui.dp(activity,8);addView(metadata,mp);
+            caption.setTextSize(13);setMinimumHeight(Ui.dp(activity,68));badge.setText("使用中");
         }
         void updateLatency(String title, SourceLatency.Result result) {
             int color = result.success() ? result.millis <= 800 ? 0xff79d9a1 : result.millis <= 2000 ? 0xffe7c66d : 0xfff19575
                     : result.label.equals("等待测速") || result.label.equals("测速中…") ? Ui.MUTED : 0xfff19575;
-            latency.setText(result.label); latency.setTextColor(color);
-            setContentDescription(title + "，" + result.label);
+            latency.setText(result.success()?"响应  "+result.label:result.label);latency.setTextColor(color);
+            setContentDescription(title + "，" + resolution.getText() + "，" + result.label+(isChecked()?"，当前使用":""));
         }
-        @Override public void setChecked(boolean checked) { caption.setChecked(checked); }
-        @Override public boolean isChecked() { return caption.isChecked(); }
-        @Override public void toggle() { setChecked(!isChecked()); }
     }
-
 }

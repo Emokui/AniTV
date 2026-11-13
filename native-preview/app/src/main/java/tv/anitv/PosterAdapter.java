@@ -23,7 +23,8 @@ final class PosterAdapter extends ListAdapter<Show, PosterAdapter.Holder> {
     private final RequestManager images;
     private final Events events;
     private int cardWidth = 150;
-    private boolean horizontal;
+    private boolean horizontal,selectionMode;private java.util.Set<Long> checked=java.util.Collections.emptySet();
+    void selection(boolean active,java.util.Set<Long> ids){selectionMode=active;checked=new java.util.HashSet<>(ids);notifyItemRangeChanged(0,getItemCount(),"selection");}
     PosterAdapter(Activity activity, Events events) {
         super(new DiffUtil.ItemCallback<Show>() {
             @Override public boolean areItemsTheSame(@NonNull Show a, @NonNull Show b) { return a.id == b.id; }
@@ -33,6 +34,9 @@ final class PosterAdapter extends ListAdapter<Show, PosterAdapter.Holder> {
         setHasStableIds(true);
         setStateRestorationPolicy(StateRestorationPolicy.PREVENT_WHEN_EMPTY);
     }
+    static int titleHeight(Activity a){return Math.max(Ui.dp(a,24),Math.round(13*a.getResources().getDisplayMetrics().scaledDensity*1.4f));}
+    static int subtitleHeight(Activity a){return Math.max(Ui.dp(a,15),Math.round(11*a.getResources().getDisplayMetrics().scaledDensity*1.4f));}
+    static int cardHeight(Activity a,int width){return Math.round(width*1.43f)+Ui.dp(a,15)+titleHeight(a)+subtitleHeight(a);}
     void horizontal() { horizontal = true; }
     void size(int width) { cardWidth = width; }
     void pauseImages(boolean pause) { if (pause) images.pauseRequests(); else images.resumeRequests(); }
@@ -41,7 +45,7 @@ final class PosterAdapter extends ListAdapter<Show, PosterAdapter.Holder> {
     @NonNull @Override public Holder onCreateViewHolder(@NonNull ViewGroup parent, int type) {
         if(type==1){
             View spacer=new View(activity);spacer.setVisibility(View.INVISIBLE);spacer.setFocusable(false);spacer.setClickable(false);
-            RecyclerView.LayoutParams lp=new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,Math.round(cardWidth*1.43f)+Ui.dp(activity,54));
+            RecyclerView.LayoutParams lp=new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,cardHeight(activity,cardWidth));
             lp.setMargins(Ui.dp(activity,4),Ui.dp(activity,5),Ui.dp(activity,4),Ui.dp(activity,5));spacer.setLayoutParams(lp);
             return new Holder(spacer,null,null,null);
         }
@@ -51,22 +55,25 @@ final class PosterAdapter extends ListAdapter<Show, PosterAdapter.Holder> {
         card.setFocusableInTouchMode(true);
         card.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         RecyclerView.LayoutParams params = new RecyclerView.LayoutParams(horizontal ? cardWidth : ViewGroup.LayoutParams.MATCH_PARENT,
-                Math.round(cardWidth * 1.43f) + Ui.dp(activity, 54));
+                cardHeight(activity,cardWidth));
         params.setMargins(Ui.dp(activity, 4), Ui.dp(activity, 5), Ui.dp(activity, 4), Ui.dp(activity, 5));
         card.setLayoutParams(params);
         ImageView image = new ImageView(activity); image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        Ui.round(image,6);
         image.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         card.addView(image, new LinearLayout.LayoutParams(-1, 0, 1));
         TextView title = Ui.text(activity, "", 13, Ui.TEXT); title.setMaxLines(1); title.setEllipsize(TextUtils.TruncateAt.END);
-        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, Ui.dp(activity, 24));
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, titleHeight(activity));
         title.setGravity(android.view.Gravity.CENTER_VERTICAL); card.addView(title, titleParams);
-        TextView subtitle = Ui.text(activity, "", 10, Ui.MUTED); subtitle.setMaxLines(1);
+        TextView subtitle = Ui.text(activity, "", 11, Ui.MUTED); subtitle.setMaxLines(1);
         subtitle.setEllipsize(TextUtils.TruncateAt.END);
-        card.addView(subtitle, new LinearLayout.LayoutParams(-1, Ui.dp(activity, 15)));
+        card.addView(subtitle, new LinearLayout.LayoutParams(-1, subtitleHeight(activity)));
         return new Holder(card, image, title, subtitle);
     }
+    private void bindSelection(Holder h,int position){Show show=getItem(position);if(show.id<0)return;h.title.setText((selectionMode?(checked.contains(show.id)?"✓ ":"○ "):"")+show.title);h.itemView.setSelected(selectionMode && checked.contains(show.id));}
+    @Override public void onBindViewHolder(@NonNull Holder h,int position,@NonNull java.util.List<Object> payloads){if(!payloads.isEmpty() && payloads.contains("selection"))bindSelection(h,position);else onBindViewHolder(h,position);}
     @Override public void onBindViewHolder(@NonNull Holder h, int position) {
-        Show show = getItem(position);if(show.id<0)return; h.title.setText(show.title); h.subtitle.setText(show.subtitle);
+        Show show = getItem(position);if(show.id<0)return;bindSelection(h,position);h.subtitle.setText(show.subtitle);
         h.itemView.setContentDescription(show.title + "，" + show.subtitle);
         images.load(show.image.isEmpty() ? null : show.image).override(cardWidth, Math.round(cardWidth * 1.43f))
                 .centerCrop().dontAnimate().placeholder(new PosterDrawable(show.id))

@@ -28,9 +28,14 @@ public class LoginCancellationTest {
         RefreshRaceTest.setHttp(new OkHttpClient.Builder().addInterceptor(c->new Response.Builder().request(c.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK").body(ResponseBody.create("{}",MediaType.get("application/json"))).build()).build());
     }
     private TextView button(View root,String text){if(root instanceof TextView && text.contentEquals(((TextView)root).getText()))return (TextView)root;if(root instanceof ViewGroup)for(int i=0;i<((ViewGroup)root).getChildCount();i++){TextView found=button(((ViewGroup)root).getChildAt(i),text);if(found!=null)return found;}return null;}
+    private int fillFields(View root,int index){
+        if(root instanceof EditText){((EditText)root).setText(index++==0?"test-user":"test-secret");}
+        else if(root instanceof ViewGroup)for(int i=0;i<((ViewGroup)root).getChildCount();i++)index=fillFields(((ViewGroup)root).getChildAt(i),index);
+        return index;
+    }
     private void submit(LoginActivity activity)throws Exception{
         ViewGroup root=(ViewGroup)((ViewGroup)activity.findViewById(android.R.id.content)).getChildAt(0);int index=0;
-        for(int i=0;i<root.getChildCount();i++)if(root.getChildAt(i) instanceof EditText)((EditText)root.getChildAt(i)).setText(index++==0?"test-user":"test-secret");
+        assertEquals(2,fillFields(root,0));
         button(root,loggedIn?"重新登录":"登录").performClick();assertTrue(parsed.await(2,TimeUnit.SECONDS));
     }
     @Test public void responseParsedAfterLeavingCannotSaveSession()throws Exception{
