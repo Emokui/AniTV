@@ -23,6 +23,18 @@ AniTV 是面向电视大屏的原生 Android 番剧客户端。界面围绕遥�
 | 收藏、缓存管理与侧栏导航 | MP4 / HLS、倍速与画面比例设置 |
 | 面向电视的方向键与确认键交互 | 适配遥控器的弹窗和焦点移动 |
 
+## 界面预览
+
+<table>
+  <tr>
+    <td align="center" width="50%"><strong>搜索结果</strong><br /><img src="search-results.png" alt="AniTV 搜索结果页面" width="100%" /></td>
+    <td align="center" width="50%"><strong>番剧详情</strong><br /><img src="series-detail.png" alt="AniTV 番剧详情页面" width="100%" /></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><strong>封面选集</strong><br /><img src="episode-picker.png" alt="AniTV 封面选集界面" width="76%" /></td>
+  </tr>
+</table>
+
 ## 下载与安装
 
 前往 [AniTV 1.0 发布页](https://github.com/Emokui/AniTV/releases/tag/v1.0) 获取安装包或源码：
