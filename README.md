@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="anitv-banner-source.png" alt="AniTV" width="320" />
+  <img src="anitv-banner-source.png" alt="AniTV" width="840" />
 
   <h1>AniTV</h1>
   <p>为 Android TV 打造的原生番剧浏览与播放客户端</p>
