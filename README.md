@@ -4,7 +4,7 @@
   <h1>AniTV</h1>
   <p>为 Android TV 打造的原生番剧浏览与播放客户端</p>
   <p>
-    <a href="https://github.com/Emokui/AniTV/releases/tag/v1.0">下载 1.0</a> ·
+    <a href="https://github.com/Emokui/AniTV/releases/tag/v1.1">下载 1.1</a> ·
     <a href="native-preview/">浏览源码</a> ·
     <a href="native-preview/README.md">构建说明</a>
   </p>
@@ -39,12 +39,12 @@ AniTV 是面向电视大屏的原生 Android 番剧客户端。界面围绕遥�
 
 ## 下载与安装
 
-前往 [AniTV 1.0 发布页](https://github.com/Emokui/AniTV/releases/tag/v1.0) 获取安装包或源码：
+前往 [AniTV 1.1 发布页](https://github.com/Emokui/AniTV/releases/tag/v1.1) 获取安装包或源码：
 
-- [下载 Android APK](https://github.com/Emokui/AniTV/releases/download/v1.0/AniTV-1.0-30108.apk)
-- [下载完整源码 ZIP](https://github.com/Emokui/AniTV/releases/download/v1.0/AniTV-1.0-source.zip)
+- [下载 Android APK](https://github.com/Emokui/AniTV/releases/download/v1.1/AniTV-1.1-30132.apk)
+- [下载完整源码 ZIP](https://github.com/Emokui/AniTV/releases/download/v1.1/AniTV-1.1-30132-source.zip)
 
-版本：**1.0**（versionCode `30108`） · 最低系统：**Android 8.0 / API 26**
+版本：**1.1**（versionCode `30132`） · 最低系统：**Android 8.0 / API 26**
 
 ## 从源码构建
 
