@@ -35,4 +35,30 @@ public class CatalogWindowTest {
         for(int i=0;i<6;i++)pages.append(page(i),true);
         pages.append(page(0),true);assertTrue(pages.ended());assertTrue(pages.snapshot().size()<=120);
     }
+    @Test public void prependHonorsExplicitNextCursorDistinctFromLastShowId() throws Exception {
+        PageAccumulator pages = new PageAccumulator();
+        pages.windowed(true);
+        List<CatalogCodec.Page> offsetPages = new ArrayList<>();
+        for (int p = 0; p < 4; p++) {
+            List<Show> shows = new ArrayList<>();
+            for (int i = 0; i < 10; i++) {
+                long id = 5000 + p * 10 + i;
+                shows.add(new Show(id, "番剧" + id, "", ""));
+            }
+            CatalogCodec.Page frame = new CatalogCodec.Page(shows, (p + 1) * 10L);
+            offsetPages.add(frame);
+            pages.append(frame, true);
+        }
+        assertEquals(0L, pages.previousCursor());
+        // If server shrank and page 0 is now terminal (next == -1), prepend must reject it instead of falling back to lastShow.id.
+        CatalogCodec.Page shrunkTerminal = new CatalogCodec.Page(page(0).shows, -1);
+        PageAccumulator idWindow = new PageAccumulator();
+        idWindow.windowed(true);
+        for (int i = 0; i < 4; i++) idWindow.append(page(i), true);
+        assertThrows(java.io.IOException.class, () -> idWindow.prepend(idWindow.previousCursor(), shrunkTerminal));
+
+        pages.prepend(0L, offsetPages.get(0));
+        assertEquals(offsetPages.get(0).shows.get(0), pages.snapshot().get(0));
+        assertEquals(30L, pages.cursor());
+    }
 }

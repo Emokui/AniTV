@@ -47,4 +47,35 @@ public class PlayerSourceMemoryTest {
             PlayerActivity player=controller.get();await(()->count(player)==3);assertEquals(2,field(player,"sourceIndex"));
         }
     }
+    @Test public void savedSourceIndexSurvivesActivityRecreationWithoutPreference()throws Exception {
+        AniApp app=(AniApp)RuntimeEnvironment.getApplication();
+        app.getSharedPreferences("native-source-preferences",0).edit().clear().commit();
+        Field http=AniApp.class.getDeclaredField("http");http.setAccessible(true);
+        java.util.concurrent.atomic.AtomicInteger tokenCounter=new java.util.concurrent.atomic.AtomicInteger();
+        http.set(app,new OkHttpClient.Builder().addInterceptor(chain->{
+            Request request=chain.request();String body;
+            int sig=tokenCounter.incrementAndGet();
+            if(request.url().encodedPath().equals("/vod/episode"))body="[\"第1集\",\"第2集\"]";
+            else body="[{\"url\":\"http://127.0.0.1:1/a-"+sig+".mp4\",\"caption\":\"线路 1\"},{\"url\":\"http://127.0.0.1:1/b-"+sig+".mp4\",\"caption\":\"线路 2\"},{\"url\":\"http://127.0.0.1:1/c-"+sig+".mp4\",\"caption\":\"线路 3\"}]";
+            return new Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("OK").body(ResponseBody.create(body,MediaType.get("application/json"))).build();
+        }).build());
+        android.os.Bundle saved=new android.os.Bundle();
+        try(ActivityController<PlayerActivity> controller=launch(1)) {
+            PlayerActivity player=controller.get();await(()->count(player)==3);
+            assertEquals(0,field(player,"sourceIndex"));
+            player.timedOut(42000);
+            assertEquals(1,field(player,"sourceIndex"));
+            controller.saveInstanceState(saved);
+        }
+        try(ActivityController<PlayerActivity> recreated=Robolectric.buildActivity(PlayerActivity.class,
+                new Intent(app,PlayerActivity.class).putExtra("showId",42L).putExtra("title","线路记忆测试").putExtra("episode",1))
+                .create(saved).start().resume()) {
+            PlayerActivity player=recreated.get();await(()->count(player)==3);
+            assertEquals(1,field(player,"sourceIndex"));
+            await(()->{try{return ((List<?>)field(player,"episodes")).size()==2;}catch(Exception e){throw new AssertionError(e);}});
+            player.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_MEDIA_NEXT));
+            await(()->{try{return ((Integer)field(player,"number"))==2 && count(player)==3;}catch(Exception e){throw new AssertionError(e);}});
+            assertEquals(0,field(player,"sourceIndex"));
+        }
+    }
 }

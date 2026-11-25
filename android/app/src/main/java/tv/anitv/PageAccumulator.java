@@ -58,7 +58,7 @@ public final class PageAccumulator {
         if(!hasPrevious() || request!=previousCursor())throw new java.io.IOException("前一段目录已失效，请刷新索引");
         if(page.shows.isEmpty())throw new java.io.IOException("前一段目录为空，请稍后重试");
         // A changed server page must not silently introduce a gap into the retained window.
-        long next=page.shows.get(page.shows.size()-1).id;
+        long next=page.next!=0?page.next:page.shows.get(page.shows.size()-1).id;
         if(frames.isEmpty() || next!=frames.get(0).request)throw new java.io.IOException("目录已更新，请长按侧栏的索引刷新");
         long oldFirst=items.isEmpty()?-1:items.keySet().iterator().next();
         LinkedHashMap<Long,Show> joined=new LinkedHashMap<>();for(Show show:page.shows)joined.put(show.id,show);joined.putAll(items);

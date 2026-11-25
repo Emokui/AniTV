@@ -65,4 +65,51 @@ public class SettingsNavigationTest {
             assertMain(c.get(),0);assertEquals("https://api.example.org/",new Library(c.get()).endpoint());
         }
     }
+    @Test public void endpointSwitchResetsScrollFocusAndCatalogWindowAndShowsInlineDialogErrorsOnTv()throws Exception{
+        AniApp app=(AniApp)RuntimeEnvironment.getApplication();
+        Field http=AniApp.class.getDeclaredField("http");http.setAccessible(true);
+        http.set(app,new okhttp3.OkHttpClient.Builder().addInterceptor(chain->new okhttp3.Response.Builder()
+                .request(chain.request()).code(200).message("OK").protocol(okhttp3.Protocol.HTTP_1_1)
+                .body(okhttp3.ResponseBody.create("[]",okhttp3.MediaType.get("application/json"))).build()).build());
+        try(ActivityController<HomeActivity> c=home()){
+            HomeActivity a=c.get();
+            // Seed non-zero focusedPosition, non-null scroll state, and non-empty pages before switching endpoint.
+            Field focused=HomeActivity.class.getDeclaredField("focusedPosition");focused.setAccessible(true);focused.setInt(a,14);
+            PageAccumulator pages=(PageAccumulator)field(a,"pages");
+            pages.append(new CatalogCodec.Page(java.util.Collections.singletonList(new Show(77,"旧接口番剧","","")),-1),true);
+            assertFalse(pages.snapshot().isEmpty());
+
+            open(a);choose(a,1);
+            AlertDialog linkDialog=dialog(a);
+            android.widget.EditText linkInput=edit(linkDialog.getWindow().getDecorView());
+            linkDialog.getButton(AlertDialog.BUTTON_POSITIVE).requestFocus();
+            linkInput.setText("not a url");
+            linkDialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick();idle();
+            android.widget.TextView linkError=linkDialog.getWindow().getDecorView().findViewWithTag("dialog-field-error");
+            assertNotNull(linkError);assertEquals(View.VISIBLE,linkError.getVisibility());
+            assertFalse(linkError.getText().toString().isEmpty());assertNotNull(linkInput.getError());assertTrue(linkInput.hasFocus());
+            linkInput.setText("https://example.org/ok.mp4");
+            assertEquals(View.GONE,linkError.getVisibility());
+            a.onBackPressed();idle();
+
+            choose(a,0);
+            AlertDialog endpointDialog=dialog(a);
+            android.widget.EditText endpointInput=edit(endpointDialog.getWindow().getDecorView());
+            endpointDialog.getButton(AlertDialog.BUTTON_POSITIVE).requestFocus();
+            endpointInput.setText("http://insecure.example.org/subpath");
+            endpointDialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick();idle();
+            android.widget.TextView endpointError=endpointDialog.getWindow().getDecorView().findViewWithTag("dialog-field-error");
+            assertNotNull(endpointError);assertEquals(View.VISIBLE,endpointError.getVisibility());assertTrue(endpointInput.hasFocus());
+
+            endpointInput.setText("https://next.example.org");
+            assertEquals(View.GONE,endpointError.getVisibility());
+            endpointDialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick();idle();
+            HomeActivity recreated=c.get();
+            assertEquals(0,field(recreated,"focusedPosition"));
+            assertNull(field(recreated,"restoredScroll"));
+            assertTrue(((PageAccumulator)field(recreated,"pages")).snapshot().isEmpty());
+        }finally{
+            new Library(app).prefs.edit().remove("endpoint").commit();
+        }
+    }
 }

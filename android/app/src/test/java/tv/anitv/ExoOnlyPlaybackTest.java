@@ -63,4 +63,20 @@ public class ExoOnlyPlaybackTest {
             Shadows.shadowOf(Looper.getMainLooper()).idle();assertNull(player(engine));assertFalse(engine.wantsPlay());
         }
     }
+    @Test public void extensionlessProbeStripsAppNetworkInterceptorAndPreservesUnderscoreHeader()throws Exception{
+        AniApp app=(AniApp)RuntimeEnvironment.getApplication();
+        OkHttpClient probe=NativePlayback.probeClient(app.http());
+        assertTrue(probe.networkInterceptors().isEmpty());
+        assertEquals(12000,probe.callTimeoutMillis());
+        try(MockWebServer server=new MockWebServer();ActivityController<Activity> controller=Robolectric.buildActivity(Activity.class).setup();
+            NativePlayback engine=new NativePlayback(controller.get(),new SurfaceView(controller.get()),app.http(),
+                    new NativePlayback.Listener(){public void ready(){}public void buffering(boolean b){}public void firstFrame(int w,int h){}public void ended(){}public void error(String m){}public void changed(){}})){
+            server.enqueue(new MockResponse().setBody("#EXTM3U\n#EXT-X-ENDLIST\n"));
+            server.enqueue(new MockResponse().setResponseCode(404));
+            engine.open(new PlaySource(server.url("/raw-stream").toString(),"","",Collections.singletonMap("_","provider-sig")),0,false);
+            RecordedRequest request=server.takeRequest(3,TimeUnit.SECONDS);
+            assertNotNull(request);
+            assertEquals("provider-sig",request.getHeader("_"));
+        }
+    }
 }

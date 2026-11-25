@@ -41,9 +41,32 @@ final class TvDialogs {
         input.setMinHeight(Ui.dp(activity,52));input.setBackground(Ui.focusBackground(activity));return input;
     }
     static View field(Activity activity,EditText input) {
+        return field(activity, input, null);
+    }
+    static View field(Activity activity,EditText input,TextView error) {
         LinearLayout panel=new LinearLayout(activity);
+        panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(Ui.dp(activity,20),Ui.dp(activity,6),Ui.dp(activity,20),Ui.dp(activity,14));
-        panel.addView(input,new LinearLayout.LayoutParams(-1,-2));return panel;
+        panel.addView(input,new LinearLayout.LayoutParams(-1,-2));
+        if (error != null) {
+            error.setTag("dialog-field-error");
+            error.setVisibility(error.getText().length() == 0 ? View.GONE : View.VISIBLE);
+            input.addTextChangedListener(new android.text.TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                    if (error.getText().length() > 0) {
+                        error.setText("");
+                        error.setVisibility(View.GONE);
+                    }
+                    if (input.getError() != null) input.setError(null);
+                }
+                @Override public void afterTextChanged(android.text.Editable s) {}
+            });
+            LinearLayout.LayoutParams ep = new LinearLayout.LayoutParams(-1, -2);
+            ep.topMargin = Ui.dp(activity, 8);
+            panel.addView(error, ep);
+        }
+        return panel;
     }
     static void show(Activity activity,AlertDialog dialog,boolean side) {
         configureWindow(activity,dialog,side);dialog.show();style(activity,dialog,side);

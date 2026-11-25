@@ -60,6 +60,25 @@ final class PlaybackHistory {
         catch(org.json.JSONException e){return new org.json.JSONArray();}
     }
     static boolean missingTitle(Show show){return show.title.trim().isEmpty() || show.title.equals("历史番剧 #"+show.id);}
+    static boolean isProgressSubtitle(String subtitle) {
+        if (subtitle == null || subtitle.isEmpty()) return false;
+        String trimmed = subtitle.trim();
+        int split = trimmed.lastIndexOf(" · ");
+        if (split <= 0 || trimmed.substring(0, split).trim().isEmpty()) return false;
+        String time = trimmed.substring(split + 3);
+        int colon = time.indexOf(':');
+        if (colon <= 0 || colon != time.length() - 3) return false;
+        if (time.charAt(colon + 1) < '0' || time.charAt(colon + 1) > '5') return false;
+        for (int i = 0; i < time.length(); i++) {
+            if (i == colon) continue;
+            char c = time.charAt(i);
+            if (c < '0' || c > '9') return false;
+        }
+        return true;
+    }
+    static String cleanSubtitle(String subtitle) {
+        return subtitle == null || isProgressSubtitle(subtitle) ? "" : subtitle;
+    }
     static boolean incomplete(Entry entry){return missingTitle(entry.show) || (entry.show.image.trim().isEmpty() && !entry.hydrated);}
     long revision(){return catalog.getLong("generation",0);}
     private static String[] names(long id,String title,String[] incoming,String[] previous){
@@ -73,11 +92,12 @@ final class PlaybackHistory {
         migrate(endpoint);
         Entry existing=find(show.id,endpoint);
         boolean hydrated=existing!=null && existing.hydrated;
+        String nextSubtitle=cleanSubtitle(show.subtitle);
         if(existing!=null){
             show=new Show(show.id,missingTitle(show)?existing.show.title:show.title,
-                    show.image.trim().isEmpty()?existing.show.image:show.image.trim(),show.subtitle.isEmpty()?existing.show.subtitle:show.subtitle,show.r18 || existing.show.r18);
+                    show.image.trim().isEmpty()?existing.show.image:show.image.trim(),nextSubtitle.isEmpty()?existing.show.subtitle:nextSubtitle,show.r18 || existing.show.r18);
         } else {
-            show=new Show(show.id,show.title,show.image.trim(),show.subtitle,show.r18);
+            show=new Show(show.id,show.title,show.image.trim(),nextSubtitle,show.r18);
         }
         hydrated &= !missingTitle(show);
         titles=names(show.id,show.title,titles,existing==null?new String[0]:existing.titles);
@@ -92,6 +112,7 @@ final class PlaybackHistory {
             for(int i=0;i<old.length() && next.length()<MAX_ENTRIES;i++) {
                 org.json.JSONObject row=old.getJSONObject(i);
                 if (row.optLong("id") != show.id || !sameEndpoint(endpoint, row)) {
+                    if (isProgressSubtitle(row.optString("subtitle"))) row.put("subtitle", "");
                     next.put(row);
                 }
             }
@@ -112,13 +133,15 @@ final class PlaybackHistory {
             String[] oldTitles=new String[0];org.json.JSONArray old=row.optJSONArray("titles");
             if(old!=null){oldTitles=new String[old.length()];for(int j=0;j<old.length();j++)oldTitles[j]=old.optString(j);}
             org.json.JSONArray names=new org.json.JSONArray();for(String name:names(metadata.show.id,title,metadata.titles,oldTitles))names.put(name);
-            boolean changed=!title.equals(row.optString("title")) || !image.equals(row.optString("image")) || !names.toString().equals(String.valueOf(old));
+            String nextSubtitle=cleanSubtitle(metadata.show.subtitle);
+            String subtitle=nextSubtitle.isEmpty()?cleanSubtitle(row.optString("subtitle")):nextSubtitle;
+            boolean changed=!title.equals(row.optString("title")) || !image.equals(row.optString("image"))
+                    || !subtitle.equals(row.optString("subtitle")) || !names.toString().equals(String.valueOf(old));
             boolean adult=metadata.show.r18 || row.optBoolean("r18");
             changed |= adult!=row.optBoolean("r18");
             boolean hydrated=(metadata.hydrated || row.optBoolean("hydrated")) && !missingTitle(new Show(metadata.show.id,title,image,""));
-            row.put("title",title).put("image",image).put("titles",names).put("r18",adult);
+            row.put("title",title).put("image",image).put("subtitle",subtitle).put("titles",names).put("r18",adult);
             if(hydrated)row.put("hydrated",true);
-            if(!metadata.show.subtitle.isEmpty())row.put("subtitle",metadata.show.subtitle);
             catalog.edit().putString("entries",values.toString()).apply();return changed;
         }catch(org.json.JSONException ignored){}
         return false;
@@ -138,40 +161,74 @@ final class PlaybackHistory {
         migrate(endpoint);
         java.util.List<Entry> result=new java.util.ArrayList<>();org.json.JSONArray values=rows();
         java.util.Set<Long> seen = new java.util.HashSet<>();
+        boolean dirty = false;
         for(int i=0;i<values.length();i++)try{
             org.json.JSONObject row=values.getJSONObject(i);
+            String rawSubtitle = row.optString("subtitle");
+            String subtitle = cleanSubtitle(rawSubtitle);
+            if (!subtitle.equals(rawSubtitle)) dirty = true;
             long id = row.getLong("id");
             if(!sameEndpoint(endpoint,row) || !seen.add(id))continue;
             org.json.JSONArray names=row.optJSONArray("titles");String[] titles=new String[names==null?1:names.length()];
             if(names==null)titles[0]=row.optString("title");else for(int j=0;j<titles.length;j++)titles[j]=names.optString(j);
-            result.add(new Entry(new Show(id,row.getString("title"),row.optString("image"),row.optString("subtitle"),row.optBoolean("r18")),endpoint,titles,row.optBoolean("hydrated")));
+            result.add(new Entry(new Show(id,row.getString("title"),row.optString("image"),subtitle,row.optBoolean("r18")),endpoint,titles,row.optBoolean("hydrated")));
         }catch(org.json.JSONException ignored){}
+        if (dirty) {
+            synchronized (LOCK) {
+                org.json.JSONArray current = rows();
+                boolean updated = false;
+                for (int i = 0; i < current.length(); i++) {
+                    org.json.JSONObject row = current.optJSONObject(i);
+                    if (row != null && isProgressSubtitle(row.optString("subtitle"))) {
+                        try { row.put("subtitle", ""); updated = true; }
+                        catch (org.json.JSONException ignored) {}
+                    }
+                }
+                if (updated) catalog.edit().putString("entries", current.toString()).apply();
+            }
+        }
         return result;
     }
     Entry find(long id,String endpoint){for(Entry entry:entries(endpoint))if(entry.show.id==id)return entry;return null;}
+    private static final class LegacyItem {
+        final String endpoint;
+        final long id;
+        LegacyItem(String endpoint, long id) { this.endpoint = endpoint; this.id = id; }
+    }
     private void migrate(String endpoint) {
         synchronized (LOCK) {
             if (migrating || catalog.getBoolean("migrated", false)) return;
+            String targetEndpoint = Library.endpointKey(endpoint);
+            String currentEndpoint = Library.endpointKey(new Library(context).endpoint());
             java.util.Map<Long, Show> known = new java.util.HashMap<>();
             for (Show show : new Library(context).favorites()) known.put(show.id, show);
-            java.util.List<Long> ids = new java.util.ArrayList<>();
-            for (String key : prefs.getAll().keySet()) if (key.endsWith(":last")) {
+            java.util.List<LegacyItem> items = new java.util.ArrayList<>();
+            for (String key : prefs.getAll().keySet()) if (key.endsWith(":last") && !key.startsWith("direct:")) {
                 try {
                     String prefix = key.substring(0, key.length() - 5);
-                    long id = Long.parseLong(prefix.substring(prefix.lastIndexOf('#') + 1));
-                    if (id > 0 && progressKey(endpoint, id).equals(prefix)) ids.add(id);
+                    int hash = prefix.lastIndexOf('#');
+                    String owner = hash > 0 ? Library.endpointKey(prefix.substring(0, hash)) : Library.DEFAULT_ENDPOINT;
+                    long id = Long.parseLong(hash > 0 ? prefix.substring(hash + 1) : prefix);
+                    if (id > 0 && progressKey(owner, id).equals(prefix) && !rawContains(id, owner)) {
+                        items.add(new LegacyItem(owner, id));
+                    }
                 } catch (NumberFormatException ignored) {}
             }
-            java.util.Collections.sort(ids);
+            items.sort((a, b) -> {
+                boolean aTarget = targetEndpoint.equals(a.endpoint), bTarget = targetEndpoint.equals(b.endpoint);
+                if (aTarget != bTarget) return aTarget ? 1 : -1;
+                int hostOrder = a.endpoint.compareTo(b.endpoint);
+                return hostOrder != 0 ? hostOrder : Long.compare(a.id, b.id);
+            });
             migrating = true;
             try {
-                int count = 0;
-                for (long id : ids) {
-                    if (count++ >= MAX_ENTRIES) break;
-                    if (rawContains(id, endpoint)) continue;
-                    Show show = known.get(id);
-                    if (show == null) show = new Show(id, "历史番剧 #" + id, "", "");
-                    remember(show, endpoint, new String[]{show.title});
+                int budget = Math.max(0, MAX_ENTRIES - rows().length());
+                int start = Math.max(0, items.size() - budget);
+                for (int i = start; i < items.size(); i++) {
+                    LegacyItem item = items.get(i);
+                    Show show = currentEndpoint.equals(item.endpoint) ? known.get(item.id) : null;
+                    if (show == null) show = new Show(item.id, "历史番剧 #" + item.id, "", "");
+                    remember(show, item.endpoint, new String[]{show.title});
                 }
                 pruneProgress(rows());
                 catalog.edit().putBoolean("migrated", true).apply();

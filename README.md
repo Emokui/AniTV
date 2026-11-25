@@ -7,7 +7,7 @@
 
 ## 版本与安装
 
-当前源码对应 **1.1（构建号 30136）**，支持 **Android 8.0 / API 26 及以上**。进度迁移、线路切换和收藏多选详见 [30136 版本说明](docs/releases/RELEASE-1.1-30136.md)。
+当前源码版本为 **1.1.1（构建号 30137）**，支持 **Android 8.0 / API 26 及以上**。这一版的优化见 [30137 更新日志](CHANGELOG.md#anitv-111--30137)。
 
 从 [GitHub Releases](https://github.com/Emokui/AniTV/releases) 下载对应构建的 APK。以相同签名覆盖安装，可保留账号、收藏、历史和设置。
 

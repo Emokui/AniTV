@@ -43,17 +43,18 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     private final Runnable hideFeedback = () -> Ui.hide(feedback);
     private ProgressBar loading, timeline;
     private long showId, resumePosition, lastSeek, pendingSeek = -1, lastSave;
-    private String showTitle, directUrl, historyKey, progressKey, episodeTitle;
+    private String showTitle, directUrl, historyKey, progressKey, episodeTitle, restoredSourceUrl = "";
     private String[] playbackTitles;
-    private int number, sourceIndex, sourceGeneration, timeoutSwitches;
+    private int number, sourceIndex, restoredSourceIndex = -1, sourceGeneration, timeoutSwitches;
     private boolean surfaceReady, started, destroyed, failed, finished, desiredPlaying = true, dialogOpen;
     private AlertDialog dialog;
+    private boolean[] sourceDialogAutoSwitched;
     private boolean prepareAfterDialog;
     private boolean backKeyDown, backExitArmed;
     private long backExitAt;
     private boolean keepScreenOn;
     private int playbackMenuPosition=-1;
-    private boolean historyRecorded, episodesLoading, autoEpisodeRequest;
+    private boolean historyRecorded, episodesLoading, autoEpisodeRequest, autoNextPending;
     private java.util.function.Consumer<String> episodeAction;
     private static final long BACK_EXIT_WINDOW_MS = 5000;
     private static final String INVALID_LINK_HINT = "确认返回重新输入";
@@ -78,7 +79,13 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         episodeTitle = state == null ? getIntent().getStringExtra("episodeTitle") : state.getString("episodeTitle");
         if (episodeTitle == null) episodeTitle = "";
         number = state == null ? getIntent().getIntExtra("episode", 1) : state.getInt("episode", 1);
-        sourceIndex = state == null ? 0 : state.getInt("source", 0);
+        if (state != null) {
+            restoredSourceIndex = state.getInt("source", -1);
+            restoredSourceUrl = state.getString("sourceUrl", "");
+            sourceIndex = Math.max(0, restoredSourceIndex);
+        } else {
+            sourceIndex = 0;
+        }
         history = new PlaybackHistory(this); historyKey = PlaybackHistory.key(showId, directUrl);
         String endpoint = new Library(this).endpoint();
         progressKey = showId > 0 ? PlaybackHistory.progressKey(endpoint, showId) : historyKey;
@@ -159,6 +166,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     }
     private void finishEpisodeLoad(String error) {
         autoEpisodeRequest = false;
+        autoNextPending = false;
         episodesLoading = false;
         java.util.function.Consumer<String> action = episodeAction;
         episodeAction = null;
@@ -166,6 +174,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     }
     private void cancelEpisodeAction() {
         episodeAction = null;
+        autoNextPending = false;
         if (autoEpisodeRequest) {
             episodeTask.cancel();
             autoEpisodeRequest = false;
@@ -173,8 +182,10 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         }
     }
     private void readEpisodesFor(Runnable action) {
+        boolean manualPending = episodeAction != null && !autoNextPending;
         autoEpisodeRequest = false;
-        if (episodeAction == null) Toast.makeText(this, "正在读取剧集…", Toast.LENGTH_SHORT).show();
+        autoNextPending = false;
+        if (!manualPending) Toast.makeText(this, "正在读取剧集…", Toast.LENGTH_SHORT).show();
         episodeAction = error -> {
             if (dialog != null && dialog.isShowing()) return;
             if (error != null) Toast.makeText(this, error, Toast.LENGTH_SHORT).show();
@@ -189,7 +200,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     private void loadSources() {
         if (sourceTask != null) sourceTask.cancel();
         final int token = ++sourceGeneration;
-        sources = new ArrayList<>(); failed = false; finished = false;
+        sources = new ArrayList<>(); failed = false; finished = false; prepareAfterDialog = false; timeoutSwitches = 0;
         syncControls();
         loading.setVisibility(View.VISIBLE); status.setText("正在读取播放线路…");
         sourceTask = api.sources(showId, playbackTitles, selectedEpisode(), new PlaybackApi.Result<List<PlaySource>>() {
@@ -199,19 +210,36 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
                 sources = values;
                 timeoutSwitches = 0;
                 if (sources.isEmpty()) { error("这一集暂无播放线路，可按上键换集或确认键重试"); return; }
-                int preferred=sourcePreference.match(sources);
-                sourceIndex=preferred>=0?preferred:0;
+                int savedIndex = restoredSourceIndex;
+                String savedUrl = restoredSourceUrl;
+                restoredSourceIndex = -1;
+                restoredSourceUrl = "";
+                int matched = -1;
+                if (savedUrl != null && !savedUrl.isEmpty()) {
+                    for (int i = 0; i < sources.size(); i++) {
+                        if (savedUrl.equals(sources.get(i).url)) { matched = i; break; }
+                    }
+                }
+                if (matched < 0 && savedIndex >= 0 && savedIndex < sources.size()) {
+                    matched = savedIndex;
+                }
+                if (matched < 0) {
+                    int preferred = sourcePreference.match(sources);
+                    matched = preferred >= 0 ? preferred : 0;
+                }
+                sourceIndex = matched;
                 prepare();
             }
             @Override public void error(String message) { if (!destroyed && token == sourceGeneration) PlayerActivity.this.error(message + "\n确认重试 · 上键选集 · 返回退出"); }
         });
     }
     private void prepare() {
-        if (!surfaceReady || !started || sources.isEmpty() || destroyed) return;
+        if (!started || sources.isEmpty() || destroyed) return;
         if (dialogOpen) {
             prepareAfterDialog = true;
             return;
         }
+        if (!surfaceReady) return;
         prepareAfterDialog = false;
         clearFeedback();
         pendingSeek = -1; lastSeek = 0;
@@ -234,8 +262,8 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     private void rememberHistory(){
         if(historyRecorded || showId<=0)return;
         historyRecorded=true;
-        String image=getIntent().getStringExtra("image"),subtitle=getIntent().getStringExtra("subtitle");
-        history.remember(new Show(showId,showTitle,image==null?"":image,subtitle==null?"":subtitle,getIntent().getBooleanExtra("r18",false)),
+        String image=getIntent().getStringExtra("image"),subtitle=PlaybackHistory.cleanSubtitle(getIntent().getStringExtra("subtitle"));
+        history.remember(new Show(showId,showTitle,image==null?"":image,subtitle,getIntent().getBooleanExtra("r18",false)),
                 new Library(this).endpoint(),playbackTitles);
     }
     private void update() {
@@ -276,6 +304,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
             timeoutSwitches = 0;
             if (sources.isEmpty() && !directUrl.isEmpty()) { finish(); return; }
             desiredPlaying = true;
+            failed = false;
             if (sources.isEmpty()) loadSources();
             else prepare();
         } else if (finished) { seekFromEnd(0); }
@@ -287,6 +316,11 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         cancelEpisodeAction();
         finished = false;
         desiredPlaying = true;
+        resumePosition = position;
+        if (!engine.prepared()) {
+            prepare();
+            return;
+        }
         status.setText("");
         engine.seek(position);
         engine.play();
@@ -335,12 +369,20 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
             else Toast.makeText(this, "暂无可用线路，确认键重试", Toast.LENGTH_SHORT).show();
             return;
         }
-        boolean resume = desiredPlaying && !failed && !finished; engine.pause(); dialogOpen = true;
-        final boolean[] changed = {false};
-        dialog = SourcePicker.create(this, sources, sourceIndex, engine.videoResolution(), index -> {
+        boolean[] resume = {desiredPlaying && !failed && !finished};
+        engine.pause(); dialogOpen = true;
+        final boolean[] changed = {false}, autoSwitched = {false};
+        sourceDialogAutoSwitched = autoSwitched;
+        dialog = SourcePicker.create(this, sources, sourceIndex, failed ? "" : engine.videoResolution(), failed, index -> {
             sourcePreference.remember(sources.get(index));
-            if (index != sourceIndex || failed) {
-                changed[0] = true; timeoutSwitches = 0; save(); sourceIndex = index; desiredPlaying = true; prepare();
+            timeoutSwitches = 0;
+            desiredPlaying = true;
+            if (index != sourceIndex || failed || autoSwitched[0] || finished) {
+                if (!failed && !autoSwitched[0] && !finished) save();
+                if (finished) resumePosition = 0;
+                changed[0] = true; failed = false; finished = false; sourceIndex = index; prepare();
+            } else {
+                resume[0] = true;
             }
         });
         showPlayerDialog(resume, changed);
@@ -372,6 +414,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         showPlayerDialog(resume,changed);
     }
     private void readDrawerEpisodes(AlertDialog opened, int delta, boolean[] changed) {
+        autoNextPending = false;
         PlayerDrawer.setSettingsStatus(opened, "正在读取剧集…");
         episodeAction = error -> {
             if (dialog != opened || !opened.isShowing()) return;
@@ -387,6 +430,9 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         loadEpisodes();
     }
     private void showPlayerDialog(boolean resume, boolean[] changed) {
+        showPlayerDialog(new boolean[]{resume}, changed);
+    }
+    private void showPlayerDialog(boolean[] resume, boolean[] changed) {
         cancelEpisodeAction();
         clearFeedback();
         backKeyDown = false; backExitArmed = false;
@@ -401,13 +447,13 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         });
         opened.setOnDismissListener(d -> {
             if (dialog != opened) return;
-            episodeAction = null; dialog = null; dialogOpen = false;
+            episodeAction = null; autoNextPending = false; sourceDialogAutoSwitched = null; dialog = null; dialogOpen = false;
             backKeyDown = false; backExitArmed = false;
             if (!destroyed && started) {
                 if (prepareAfterDialog) {
                     prepareAfterDialog = false;
-                    prepare();
-                } else if (!changed[0] && resume && desiredPlaying && !failed && !finished) {
+                    if (!failed && !finished) prepare();
+                } else if (!changed[0] && resume[0] && desiredPlaying && !failed && !finished) {
                     engine.play();
                 }
                 syncControls();
@@ -426,7 +472,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         } else { save(); finish(); }
     }
     private void changeEpisode(int next) {
-        save(); engine.stop();historyRecorded=false; number = next; episodeTitle = ""; sourceIndex = 0; pendingSeek = -1;
+        save(); engine.stop();historyRecorded=false; number = next; episodeTitle = ""; sourceIndex = 0; restoredSourceIndex = -1; restoredSourceUrl = ""; pendingSeek = -1; lastSeek = 0; prepareAfterDialog = false;
         resumePosition = history.position(progressKey, number); desiredPlaying = true; loadSources();
     }
     private boolean nextEpisode(int delta) {
@@ -508,6 +554,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         if (auto && episodes.isEmpty() && directUrl.isEmpty()) awaitAutoNext(episodesLoading);
     }
     private void awaitAutoNext(boolean initialReadPending) {
+        autoNextPending = true;
         autoEpisodeRequest = !episodesLoading;
         episodeAction = error -> {
             if (!finished || dialogOpen) return;
@@ -526,17 +573,21 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         }
         timeoutSwitches++;
         sourceIndex = (sourceIndex + 1) % sources.size();
+        if (sourceDialogAutoSwitched != null) sourceDialogAutoSwitched[0] = true;
+        if (dialog != null && dialog.isShowing()) SourcePicker.updateActive(dialog, sourceIndex, false);
         prepare();
     }
     @Override public void error(String message) {
-        failed = true; loading.setVisibility(View.GONE); status.setText(message == null ? "播放失败，请重试或换源" : message);
+        failed = true; prepareAfterDialog = false;
+        if (dialog != null && dialog.isShowing()) SourcePicker.updateActive(dialog, sourceIndex, true);
+        loading.setVisibility(View.GONE); status.setText(message == null ? "播放失败，请重试或换源" : message);
         syncControls(); Log.w("AniTVPlayer", "playback unavailable");
     }
     @Override public void changed() { update(); }
-    @Override public void surfaceCreated(SurfaceHolder holder) { surfaceReady = true; prepare(); }
+    @Override public void surfaceCreated(SurfaceHolder holder) { surfaceReady = true; if (!failed && !finished) prepare(); }
     @Override public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) { }
     @Override public void surfaceDestroyed(SurfaceHolder holder) { save(); surfaceReady = false; if (engine != null) engine.stop(); }
-    @Override protected void onStart() { super.onStart(); started = true;historyRecorded=false; if (surfaceReady) prepare(); main.removeCallbacks(tick); main.post(tick); }
+    @Override protected void onStart() { super.onStart(); started = true;historyRecorded=false; if (surfaceReady && !failed && !finished) prepare(); main.removeCallbacks(tick); main.post(tick); }
     @Override protected void onStop() {
         save(); if (failed || finished) desiredPlaying = false;
         started = false;
@@ -549,6 +600,8 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     }
     @Override protected void onSaveInstanceState(Bundle state) {
         save(); super.onSaveInstanceState(state); state.putInt("episode", number); state.putString("episodeTitle", selectedEpisode().named ? selectedEpisode().title : ""); state.putInt("source", sourceIndex);
+        String activeUrl = sourceIndex >= 0 && sourceIndex < sources.size() ? sources.get(sourceIndex).url : restoredSourceUrl;
+        if (activeUrl != null && !activeUrl.isEmpty()) state.putString("sourceUrl", activeUrl);
         state.putLong("position", resumePosition); state.putBoolean("playing", desiredPlaying);
     }
     @Override public void finish(){super.finish();overridePendingTransition(0,0);}

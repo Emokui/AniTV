@@ -34,6 +34,12 @@ final class NativePlayback implements AutoCloseable {
         void ended(); void error(String message); void changed();
         default void timedOut(long position) { error("线路超时"); }
     }
+    private static final OkHttpClient PROBE_HTTP = new OkHttpClient.Builder()
+            .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+            .callTimeout(12, java.util.concurrent.TimeUnit.SECONDS)
+            .retryOnConnectionFailure(false)
+            .build();
     private final Activity activity;
     private final SurfaceView surface;
     private final OkHttpClient http;
@@ -46,12 +52,50 @@ final class NativePlayback implements AutoCloseable {
     private boolean ready,rendered,wantPlay,closed;
     private int generation,aspectMode,videoWidth,videoHeight;
     private float speed;
+    private android.view.View observedParent;
+    private final android.view.View.OnLayoutChangeListener parentLayoutListener =
+            (v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+                if (!closed && (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop)) {
+                    fit(videoWidth, videoHeight);
+                }
+            };
+    private final android.view.View.OnAttachStateChangeListener surfaceAttachListener =
+            new android.view.View.OnAttachStateChangeListener() {
+                @Override public void onViewAttachedToWindow(android.view.View v) { observeParent(); fit(videoWidth, videoHeight); }
+                @Override public void onViewDetachedFromWindow(android.view.View v) { detachParent(); }
+            };
+    static OkHttpClient probeClient(OkHttpClient base) {
+        OkHttpClient.Builder builder = (base == null ? PROBE_HTTP : base).newBuilder()
+                .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+                .callTimeout(12, java.util.concurrent.TimeUnit.SECONDS)
+                .retryOnConnectionFailure(false);
+        builder.networkInterceptors().clear();
+        return builder.build();
+    }
     NativePlayback(Activity activity,SurfaceView surface,OkHttpClient http,Listener listener){
-        this.activity=activity;this.surface=surface;this.http=http;this.listener=listener;
+        this.activity=activity;this.surface=surface;this.http=probeClient(http);this.listener=listener;
         android.content.SharedPreferences prefs=new Library(activity).prefs;
         speed=prefs.getFloat("playback-speed",1f);
         int savedAspect = prefs.getInt("video-aspect", 0);
         aspectMode = savedAspect >= 0 && savedAspect <= 2 ? savedAspect : 0;
+        surface.addOnAttachStateChangeListener(surfaceAttachListener);
+        observeParent();
+    }
+    private void observeParent() {
+        android.view.View parent = surface.getParent() instanceof android.view.View ? (android.view.View) surface.getParent() : null;
+        if (parent == observedParent) return;
+        detachParent();
+        if (parent != null) {
+            observedParent = parent;
+            parent.addOnLayoutChangeListener(parentLayoutListener);
+        }
+    }
+    private void detachParent() {
+        if (observedParent != null) {
+            observedParent.removeOnLayoutChangeListener(parentLayoutListener);
+            observedParent = null;
+        }
     }
     void open(PlaySource source,long position,boolean play){
         if(closed)return;
@@ -155,11 +199,12 @@ final class NativePlayback implements AutoCloseable {
     private void fit(int width, int height) {
         if (width <= 0 || height <= 0) return;
         videoWidth=width;videoHeight=height;
-        android.view.View parent=(android.view.View)surface.getParent();
+        observeParent();
+        android.view.View parent=observedParent;
         if(parent==null || parent.getWidth()<=0 || parent.getHeight()<=0)return;
         int[] size=displaySize(parent.getWidth(),parent.getHeight(),width,height,aspectMode);
         android.view.ViewGroup.LayoutParams old=surface.getLayoutParams();
-        if(old.width!=size[0] || old.height!=size[1])surface.setLayoutParams(new android.widget.FrameLayout.LayoutParams(size[0],size[1],android.view.Gravity.CENTER));
+        if(old==null || old.width!=size[0] || old.height!=size[1])surface.setLayoutParams(new android.widget.FrameLayout.LayoutParams(size[0],size[1],android.view.Gravity.CENTER));
     }
     static int[] displaySize(int screenWidth,int screenHeight,int width,int height,int mode) {
         if(mode==2)return new int[]{screenWidth,screenHeight};
@@ -196,10 +241,15 @@ final class NativePlayback implements AutoCloseable {
         if(player!=null)player.seekTo(target);listener.changed();
     }
     void stop(){
-        generation++;ready=false;rendered=false;wantPlay=false;
+        generation++;ready=false;rendered=false;wantPlay=false;videoWidth=0;videoHeight=0;
         Call call=probeCall;probeCall=null;NetworkCleanup.cancel(call);
         if(probing!=null){probing.cancel(true);probing=null;}
         if(player!=null){ExoPlayer old=player;player=null;old.release();}
     }
-    @Override public void close(){closed=true;stop();worker.shutdownNow();main.removeCallbacksAndMessages(null);}
+    @Override public void close(){
+        closed=true;stop();
+        surface.removeOnAttachStateChangeListener(surfaceAttachListener);
+        detachParent();
+        worker.shutdownNow();main.removeCallbacksAndMessages(null);
+    }
 }

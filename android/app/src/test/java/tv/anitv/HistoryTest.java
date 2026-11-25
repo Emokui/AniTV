@@ -77,4 +77,21 @@ public class HistoryTest {
         assertEquals("药屋少女",history.shows(new Library(context).endpoint()).get(0).title);
         assertEquals(49,history.lastEpisode("42",1));assertEquals(45000,history.position("42",49));
     }
+    @Test public void singleEndpointMigrationPreservesOtherEndpointsUnmigratedProgress(){
+        Context context=RuntimeEnvironment.getApplication();
+        context.getSharedPreferences("native-history-list",0).edit().clear().commit();
+        String other="https://other.example";
+        String otherKey=PlaybackHistory.progressKey(other,99);
+        context.getSharedPreferences("native-playback",0).edit().clear()
+                .putBoolean("scoped-progress",true)
+                .putInt("42:last",3).putLong("42:3",30000)
+                .putInt(otherKey+":last",5).putLong(otherKey+":5",55000)
+                .commit();
+        PlaybackHistory history=new PlaybackHistory(context);
+        assertEquals(1,history.shows(Library.DEFAULT_ENDPOINT).size());
+        assertEquals(30000,history.position("42",3));
+        assertEquals(55000,history.position(otherKey,5));
+        assertEquals(1,history.shows(other).size());
+        assertEquals(99,history.shows(other).get(0).id);
+    }
 }

@@ -44,6 +44,8 @@ final class HistoryMetadata implements AutoCloseable {
         final String scope=entry.show.fromBangumi()?"":account.cacheScope(endpointUrl);
         final okhttp3.Request request=entry.show.fromBangumi()?new okhttp3.Request.Builder().url(url).build():account.scopedRequest(url,endpointUrl);
         final boolean[] fresh={false},resolved={false},finished={false},cacheDecoding={false},networkDone={false};
+        final int[] hydratedFavoriteFields={0};
+        final String[] cachedTitle={""};
         repository.request(request,true,new CatalogRepository.Listener(){
             public void loaded(byte[] bytes,boolean cached){
                 if(!valid())return;
@@ -56,7 +58,13 @@ final class HistoryMetadata implements AutoCloseable {
                         if(cached && fresh[0]){settle();return;}
                         if(!cached){fresh[0]=true;networkDone[0]=true;if(entry.show.fromBangumi() || scope.equals(new AccountSession(context).cacheScope(endpointUrl)))repository.save(request,bytes);}
                         resolved[0]=true;
-                        if(history.enrich(metadata,revision))listener.changed();
+                        boolean historyChanged=history.enrich(metadata,revision);
+                        int syncResult=new Library(context).syncFavoriteFields(metadata.show,hydratedFavoriteFields[0],
+                                MetadataTitles.merge(new String[]{entry.show.title,cachedTitle[0]},metadata.titles));
+                        hydratedFavoriteFields[0] |= syncResult & Library.REPLACE_ALL;
+                        if(cached)cachedTitle[0]=metadata.show.title;
+                        boolean favoriteChanged=(syncResult & Library.FAVORITE_CHANGED)!=0;
+                        if(historyChanged || favoriteChanged)listener.changed();
                         if(!cached)finish(false);else settle();
                     });
                 }catch(IOException error){main.post(()->{
@@ -93,7 +101,22 @@ final class HistoryMetadata implements AutoCloseable {
         String title = WirePayload.text(row.opt(source.show.fromBangumi() ? "name_cn" : "title"), "").trim();
         if (title.isEmpty()) title = WirePayload.text(row.opt("name"), "").trim();
         if (title.isEmpty() && !PlaybackHistory.missingTitle(source.show)) title = source.show.title;
-        Show show = new Show(source.show.id, title, "", source.show.subtitle);
+        String subtitle = PlaybackHistory.cleanSubtitle(source.show.subtitle);
+        if (subtitle.isEmpty()) {
+            if (source.show.fromBangumi()) {
+                String date = WirePayload.text(row.opt("date"), "").trim();
+                String platform = WirePayload.text(row.opt("platform"), "").trim();
+                subtitle = !date.isEmpty() && !platform.isEmpty() ? date + " · " + platform : !date.isEmpty() ? date : platform;
+            } else {
+                subtitle = WirePayload.text(row.opt("tagline"), "").trim();
+                if (subtitle.isEmpty()) subtitle = WirePayload.text(row.opt("subtitle"), "").trim();
+                if (subtitle.isEmpty()) {
+                    int episode = row.optInt("episode"), total = row.optInt("episodes_total", row.optInt("episodesTotal"));
+                    if (episode > 0 || total > 0) subtitle = CatalogCodec.episodes(episode, total);
+                }
+            }
+        }
+        Show show = new Show(source.show.id, title, "", subtitle);
         if (PlaybackHistory.missingTitle(show)) throw new IOException("历史详情缺少标题");
         String image = WirePayload.text(row.opt("image"), "").trim();
         JSONObject images = row.optJSONObject("images");

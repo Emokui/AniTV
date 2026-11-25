@@ -91,13 +91,26 @@ public final class HomeActivity extends Activity implements PosterAdapter.Events
     private final Runnable historyUpdate=()->{
         if(destroyed || section!=HISTORY)return;
         List<Show> shows=library.visible(new PlaybackHistory(this).shows(library.endpoint()));
-        if (batchSelecting && shows.isEmpty()) endBatchSelection();
+        View focus=currentFocus();
+        boolean cardFocused=focus!=null && grid.findContainingViewHolder(focus)!=null || pendingFocus>=0;
+        long focusedId=focusedPosition>=0 && focusedPosition<adapter.getItemCount()?adapter.getItemId(focusedPosition):-1;
+        retainBatchSelection(shows);
+        empty.setVisibility(shows.isEmpty()?View.VISIBLE:View.GONE);
+        if (batchSelecting && shows.isEmpty()) endBatchSelection(0);
+        if(cardFocused){
+            if(shows.isEmpty())rail();
+            else{
+                int mapped=indexOf(shows,focusedId);
+                focusedPosition=mapped>=0?mapped:Math.max(0,Math.min(focusedPosition,shows.size()-1));
+                if(mapped<0)needsFocus=true;
+            }
+        }
         adapter.submitList(shows,()->{if(!destroyed && section==HISTORY)restoreFocus();});
-        if (batchSelecting) updateBatchSelectionFooter();
+        if (batchSelecting) updateBatchSelection();
         else showHistoryFooter(shows.size());
     };
     private long accountRevision;
-    private boolean accountAvailable;
+    private boolean accountAvailable, switchingEndpoint;
     private Parcelable restoredScroll;
     private PageAccumulator.State restoredPages;private String restoredQuery;private long restoredShowId;private boolean restoredGridFocus;
     private final Runnable tick = new Runnable() {
@@ -123,7 +136,8 @@ public final class HomeActivity extends Activity implements PosterAdapter.Events
         else if ("中国".equals(lang)) lang="zh";
         else if ("欧美".equals(lang)) lang="en";
         else if ("韩国".equals(lang)) lang="ko";
-        AccountSession account=new AccountSession(this);accountRevision=account.revision();accountAvailable=account.available(HttpUrl.get(library.endpoint()));
+        AccountSession.Snapshot accountSnap=new AccountSession(this).snapshot(HttpUrl.get(library.endpoint()));
+        accountRevision=accountSnap.revision;accountAvailable=accountSnap.available;
         cacheManager = new CacheManager(this);
         if(state!=null && library.endpoint().equals(state.getString("catalog-endpoint")) && accountRevision==state.getLong("catalog-account",-1) && accountAvailable==state.getBoolean("catalog-account-available",false) && CatalogRepository.remainingCacheTime(state.getLong("catalog-at"),System.currentTimeMillis())>0){
             restoredPages=(PageAccumulator.State)state.getSerializable("catalog-window");restoredQuery=state.getString("catalog-query");restoredShowId=state.getLong("catalog-focus-id",-1);restoredGridFocus=state.getBoolean("catalog-grid-focus");
@@ -159,10 +173,12 @@ public final class HomeActivity extends Activity implements PosterAdapter.Events
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, Math.max(dp(18),Math.round(label.getTextSize()*1.35f))); lp.topMargin = dp(5); button.addView(label, lp);
             LinearLayout.LayoutParams row = new LinearLayout.LayoutParams(-1, dp(55)); row.topMargin = dp(3); sidebar.addView(button, row);
             button.setContentDescription(labels[i]);
-            if (index == 0 || index == 1) button.setOnFocusChangeListener((v, focused) -> {
-                if (!focused && refreshTarget == v) cancelRefreshHold();
+            button.setOnFocusChangeListener((v, focused) -> {
+                if (focused && batchSelecting) endBatchSelection();
+                if (!focused && (index == 0 || index == 1) && refreshTarget == v) cancelRefreshHold();
             });
             button.setOnClickListener(v -> {
+                if (batchSelecting) endBatchSelection();
                 if (index == SETTINGS) settings();
                 else if (index == SEARCH) search();
                 else if (index == section) {
@@ -319,13 +335,23 @@ public final class HomeActivity extends Activity implements PosterAdapter.Events
         if (!batchSelecting) footer.setText("正在补全历史标题与封面…");
         historyMetadata.start();
     }
+    private void retainBatchSelection(List<Show> shows){
+        if(!batchSelecting)return;
+        java.util.Set<Long> visibleIds=new java.util.HashSet<>();
+        for(Show show:shows)if(show.id>0)visibleIds.add(show.id);
+        selectedIds.retainAll(visibleIds);
+    }
     private void local(List<Show> shows, String emptyText) {
         shows=library.visible(shows);
         leadingSlots=0;
         loading = false; spinner.setVisibility(View.GONE); message.setText(emptyText);
         empty.setVisibility(shows.isEmpty() ? View.VISIBLE : View.GONE);
-        if (batchSelecting && shows.isEmpty()) endBatchSelection();
-        if (batchSelecting) updateBatchSelectionFooter();
+        View focus = currentFocus();
+        boolean contentFocused = focus != null && (grid.findContainingViewHolder(focus) != null || focus == grid) || pendingFocus >= 0;
+        retainBatchSelection(shows);
+        if (batchSelecting && shows.isEmpty()) endBatchSelection(0);
+        if (shows.isEmpty() && contentFocused && !returningFromDetail) rail();
+        if (batchSelecting) updateBatchSelection();
         else footer.setText(shows.size() + (section==HISTORY?" 部 · 菜单批量选择 / 长按确认删除":section==FAVORITES?" 部 · 菜单批量选择":" 部 · 方向键浏览 / 确认查看 / 返回侧栏"));
         adapter.submitList(shows, () -> restoreFocus());
     }
@@ -448,7 +474,7 @@ public final class HomeActivity extends Activity implements PosterAdapter.Events
     private void submitPages(List<Show> values,int token,int requestId,boolean backwards){
         if(!listApplying){
             int position=pendingFocus>=0?pendingFocus:focusedPosition;
-            View focus=getCurrentFocus();RecyclerView.ViewHolder current=focus==null?null:grid.findContainingViewHolder(focus);
+            View focus=currentFocus();RecyclerView.ViewHolder current=focus==null?null:grid.findContainingViewHolder(focus);
             if(pendingFocus<0 && current!=null && current.getBindingAdapterPosition()!=RecyclerView.NO_POSITION)position=current.getBindingAdapterPosition();
             listAnchor=returningFromDetail?returningShowId:position>=0 && position<adapter.getItemCount()?adapter.getItemId(position):-1;
             View anchor=layout.findViewByPosition(position);
@@ -543,7 +569,7 @@ public final class HomeActivity extends Activity implements PosterAdapter.Events
         if (pendingFocus == position) pendingFocus = -1;
         if (position >= adapter.getItemCount() - layout.getSpanCount() * 2) more();
     }
-    private void rail() { if(batchSelecting)endBatchSelection();returningFromDetail=false;listRestoreFocus=false;queuedDirections.clear();focusEpoch++;pendingFocus = -1; needsFocus = false; restoredScroll = null; rail.get(section).requestFocus(); }
+    private void rail() { if(batchSelecting)endBatchSelection();returningFromDetail=false;listRestoreFocus=false;queuedDirections.clear();focusEpoch++;pendingFocus = -1; needsFocus = false; restoredScroll = null; grid.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS); rail.get(section).requestFocus(); }
     private void filters() {
         listRestoreFocus=false;queuedDirections.clear();focusEpoch++;pendingFocus=-1;needsFocus=false;restoredScroll=null;
         grid.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
@@ -556,13 +582,14 @@ public final class HomeActivity extends Activity implements PosterAdapter.Events
                 historyFailures > 0 ? "部分信息读取失败 · 侧栏确认重试" : "确认查看 / 菜单批量选择 / 长按删除";
         footer.setText(count + " 部 · " + hint);
     }
-    private void endBatchSelection(){
+    private void endBatchSelection(){endBatchSelection(adapter.getItemCount());}
+    private void endBatchSelection(int count){
         boolean restore=batchActions.hasFocus();
-        batchSelecting=false;selectedIds.clear();batchActions.setVisibility(View.GONE);adapter.selection(false,selectedIds);
-        int count = adapter.getItemCount();
+        batchSelecting=false;selectedIds.clear();
+        if(restore){if(count>0)focusCard(focusedPosition);else rail();}
+        batchActions.setVisibility(View.GONE);adapter.selection(false,selectedIds);
         if(section==FAVORITES) footer.setText(count+" 部 · 菜单批量选择");
         else showHistoryFooter(count);
-        if(restore){if(count>0)focusCard(focusedPosition);else rail();}
     }
     private void confirmBatchSelection(){
         if(selectedIds.isEmpty()){Toast.makeText(this,"请先选择记录",Toast.LENGTH_SHORT).show();return;}
@@ -585,13 +612,24 @@ public final class HomeActivity extends Activity implements PosterAdapter.Events
         if(position>=0)focusedPosition=position;
         View anchor=layout.findViewByPosition(focusedPosition);
         returningTop=anchor==null?0:layout.getDecoratedTop(anchor)-grid.getPaddingTop();
-        Intent intent = new Intent(this, DetailActivity.class).putExtra("id", show.id)
-                .putExtra("title", show.title).putExtra("image", show.image).putExtra("subtitle", show.subtitle).putExtra("r18",show.r18)
-                .putExtra("demo", demo && section!=HISTORY);
+        String title = show.title, image = show.image, subtitle = PlaybackHistory.cleanSubtitle(show.subtitle);
+        boolean r18 = show.r18;
+        String[] playbackTitles = null;
         if (section == HISTORY) {
+            subtitle = "";
             PlaybackHistory.Entry entry = new PlaybackHistory(this).find(show.id, library.endpoint());
-            if (entry != null) intent.putExtra("playbackTitles", entry.titles);
+            if (entry != null) {
+                title = entry.show.title;
+                image = entry.show.image;
+                subtitle = entry.show.subtitle;
+                r18 |= entry.show.r18;
+                playbackTitles = entry.titles;
+            }
         }
+        Intent intent = new Intent(this, DetailActivity.class).putExtra("id", show.id)
+                .putExtra("title", title).putExtra("image", image).putExtra("subtitle", subtitle).putExtra("r18", r18)
+                .putExtra("demo", demo && section!=HISTORY);
+        if (playbackTitles != null) intent.putExtra("playbackTitles", playbackTitles);
         startActivity(intent);
     }
     private void choose(String title, String[] names, String[] values, int which) {
@@ -705,28 +743,49 @@ public final class HomeActivity extends Activity implements PosterAdapter.Events
     private void videoLink() {
         EditText input = TvDialogs.input(this,"https://…/video.mp4 或 .m3u8", "");
         input.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_URI);
-        AlertDialog dialog = TvDialogs.builder(this,"播放视频链接").setView(TvDialogs.field(this,input))
+        TextView error = Ui.text(this, "", 13, Ui.ACCENT);
+        AlertDialog dialog = TvDialogs.builder(this,"播放视频链接").setView(TvDialogs.field(this,input,error))
                 .setNegativeButton("取消", null).setPositiveButton("播放", null).create();
         dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             try {
                 String url = PlaySource.networkUrl(input.getText().toString());returnToSettings=true;dialog.dismiss();
                 startActivity(new Intent(this, PlayerActivity.class).putExtra("directUrl", url).putExtra("title", "视频链接"));
-            } catch (java.io.IOException e) { input.setError(e.getMessage()); }
+            } catch (java.io.IOException e) {
+                error.setText(e.getMessage());
+                error.setVisibility(View.VISIBLE);
+                input.setError(e.getMessage());
+                input.requestFocus();
+            }
         })); showSettingsDialog(dialog,false);
     }
     private void endpoint() {
         EditText input = TvDialogs.input(this,"HTTPS 接口地址",library.endpoint()); input.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_URI);
         input.setText(library.endpoint());
-        AlertDialog dialog = TvDialogs.builder(this,"番剧接口地址").setView(TvDialogs.field(this,input))
+        TextView error = Ui.text(this, "", 13, Ui.ACCENT);
+        AlertDialog dialog = TvDialogs.builder(this,"番剧接口地址").setView(TvDialogs.field(this,input,error))
                 .setMessage("使用 AniCh 兼容的 HTTPS 接口。修改地址不会绕过服务端验证。")
                 .setNegativeButton("取消", null).setPositiveButton("保存", null).create();
         dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             HttpUrl url = HttpUrl.parse(input.getText().toString().trim());
             if (url == null || !url.isHttps() || !url.username().isEmpty() || !url.password().isEmpty() ||
                     url.query() != null || url.fragment() != null || !url.encodedPath().equals("/")) {
-                input.setError("请输入 HTTPS 根地址，例如 https://example.org"); return;
+                String message = "请输入 HTTPS 根地址，例如 https://example.org";
+                error.setText(message);
+                error.setVisibility(View.VISIBLE);
+                input.setError(message);
+                input.requestFocus();
+                return;
             }
-            library.prefs.edit().putString("endpoint", url.toString()).putBoolean("demo", false).apply();returnToSettings=true;dialog.dismiss();demo = false; type = ""; lang = ""; year = ""; recreate();
+            library.prefs.edit().putString("endpoint", url.toString()).putBoolean("demo", false).apply();
+            if (job != null) { job.cancel(); job = null; }
+            stopHistoryMetadata();
+            if (batchSelecting) endBatchSelection();
+            pages.reset();
+            restoredPages = null; restoredQuery = null; restoredShowId = -1; restoredGridFocus = false; queryKey = null;
+            focusedPosition = 0; pendingFocus = -1; needsFocus = false; restoredScroll = null;
+            returningFromDetail = false; returningShowId = 0; returningTop = 0;
+            switchingEndpoint = true;
+            returnToSettings=true;dialog.dismiss();demo = false; type = ""; lang = ""; year = ""; recreate();
         })); showSettingsDialog(dialog,false);
     }
     private void showSettingsDialog(AlertDialog dialog,boolean side){showDialog(dialog,side,()->settings(settingsPosition));}
@@ -771,7 +830,7 @@ public final class HomeActivity extends Activity implements PosterAdapter.Events
         if(activeDialog!=null && activeDialog.isShowing() || section!=HISTORY)return false;
         if(event.getAction()==KeyEvent.ACTION_DOWN){
             if(event.getRepeatCount()==0){
-                View focus=getCurrentFocus();RecyclerView.ViewHolder holder=focus==null?null:grid.findContainingViewHolder(focus);
+                View focus=currentFocus();RecyclerView.ViewHolder holder=focus==null?null:grid.findContainingViewHolder(focus);
                 if(holder==null || holder.getBindingAdapterPosition()==RecyclerView.NO_POSITION)return false;
                 cancelHistoryPress();historyPressTarget=holder.itemView;historyPressId=adapter.getItemId(holder.getBindingAdapterPosition());
                 main.postDelayed(historyHold,600);
@@ -796,12 +855,20 @@ public final class HomeActivity extends Activity implements PosterAdapter.Events
             if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
                 if (batchSelecting) endBatchSelection();
                 else if (empty.getVisibility() != View.VISIBLE && adapter.getItemCount() > 0) {
+                    View focus = currentFocus();
+                    boolean inGrid = focus != null && grid.findContainingViewHolder(focus) != null || pendingFocus >= 0;
+                    if (!inGrid) focusCard(focusedPosition);
                     batchSelecting = true;
                     selectedIds.clear();
                     batchActions.setVisibility(View.VISIBLE);
                     updateBatchSelection();
                 }
             }
+            return true;
+        }
+        if(batchSelecting && isLocalSection() && pendingFocus>=0 && pendingFocus<adapter.getItemCount() && currentFocus()==grid &&
+                (key==KeyEvent.KEYCODE_DPAD_CENTER || key==KeyEvent.KEYCODE_ENTER || key==KeyEvent.KEYCODE_NUMPAD_ENTER)){
+            if(event.getAction()==KeyEvent.ACTION_UP && !event.isCanceled())clicked(adapter.getCurrentList().get(pendingFocus));
             return true;
         }
         if(key==KeyEvent.KEYCODE_MENU && section==1){
@@ -830,13 +897,17 @@ public final class HomeActivity extends Activity implements PosterAdapter.Events
         refreshFooter = null;
         refreshHeld = false;
     }
+    private View currentFocus(){
+        View focus=getCurrentFocus();
+        return focus!=null?focus:getWindow()==null?null:getWindow().getCurrentFocus();
+    }
     private boolean refreshConfirm(KeyEvent event){
         int key=event.getKeyCode();boolean confirm=key==KeyEvent.KEYCODE_DPAD_CENTER || key==KeyEvent.KEYCODE_ENTER || key==KeyEvent.KEYCODE_NUMPAD_ENTER;
         if(!confirm){if(event.getAction()==KeyEvent.ACTION_DOWN)cancelRefreshHold();return false;}
         if(activeDialog!=null && activeDialog.isShowing())return false;
         if(event.getAction()==KeyEvent.ACTION_DOWN){
             if(event.getRepeatCount()==0){
-                View target=getCurrentFocus();int index=rail.indexOf(target);
+                View target=currentFocus();int index=rail.indexOf(target);
                 if(index!=0 && index!=1)return false;
                 cancelRefreshHold();refreshTarget=target;refreshFooter=footer.getText();footer.setText(REFRESH_HOLD_HINT);main.postDelayed(refreshHold,2000);
             }
@@ -874,9 +945,10 @@ public final class HomeActivity extends Activity implements PosterAdapter.Events
      * used at row boundaries or while the next row is being attached. */
     private void navigate(int key) {
         if(listApplying && listRestoreFocus){if(queuedDirections.isEmpty())queuedDirections.addLast(key);return;}
-        View focus = getCurrentFocus();
+        View focus = currentFocus();
         int railIndex = rail.indexOf(focus);
         if (railIndex >= 0) {
+            if (batchSelecting) endBatchSelection();
             pendingFocus = -1; needsFocus = false; restoredScroll = null;
             if (key == KeyEvent.KEYCODE_DPAD_UP) rail.get(Math.max(0, railIndex - 1)).requestFocus();
             else if (key == KeyEvent.KEYCODE_DPAD_DOWN) rail.get(Math.min(rail.size() - 1, railIndex + 1)).requestFocus();
@@ -940,9 +1012,9 @@ public final class HomeActivity extends Activity implements PosterAdapter.Events
     }
     @Override protected void onResume() {
         super.onResume(); resumed=true;Ui.fullscreen(this); tick.run();
-        AccountSession account=new AccountSession(this);boolean available=account.available(HttpUrl.get(library.endpoint()));
-        if(accountRevision!=account.revision() || accountAvailable!=available) {
-            accountRevision=account.revision();accountAvailable=available;
+        AccountSession.Snapshot accountSnap=new AccountSession(this).snapshot(HttpUrl.get(library.endpoint()));
+        if(accountRevision!=accountSnap.revision || accountAvailable!=accountSnap.available) {
+            accountRevision=accountSnap.revision;accountAvailable=accountSnap.available;
             if(!demo && section!=FAVORITES && section!=HISTORY){rail();reload(true);}
         }
         if(section==HISTORY && adapter!=null){
@@ -973,12 +1045,12 @@ public final class HomeActivity extends Activity implements PosterAdapter.Events
     @Override protected void onSaveInstanceState(Bundle out) {
         super.onSaveInstanceState(out); out.putInt("section", section); out.putBoolean("demo", demo);
         out.putString("keyword", keyword); out.putString("type", type); out.putString("lang", lang); out.putString("year", year);
-        out.putInt("focused", focusedPosition); out.putParcelable("scroll", layout.onSaveInstanceState());
+        out.putInt("focused", focusedPosition); out.putParcelable("scroll", switchingEndpoint ? null : layout.onSaveInstanceState());
         out.putBoolean("settings-return",returnToSettings);out.putInt("settings-position",settingsPosition);
-        if(!isLocalSection() && !pages.snapshot().isEmpty()){
-            AccountSession account = new AccountSession(this);
+        if(!switchingEndpoint && !isLocalSection() && !pages.snapshot().isEmpty()){
             HttpUrl endpoint = HttpUrl.get(library.endpoint());
-            out.putSerializable("catalog-window",pages.save());out.putString("catalog-query",queryKey);out.putString("catalog-endpoint",library.endpoint());out.putLong("catalog-account",account.revision());out.putBoolean("catalog-account-available",account.available(endpoint));out.putLong("catalog-at",System.currentTimeMillis());
+            AccountSession.Snapshot accountSnap = new AccountSession(this).snapshot(endpoint);
+            out.putSerializable("catalog-window",pages.save());out.putString("catalog-query",queryKey);out.putString("catalog-endpoint",library.endpoint());out.putLong("catalog-account",accountSnap.revision);out.putBoolean("catalog-account-available",accountSnap.available);out.putLong("catalog-at",System.currentTimeMillis());
             out.putLong("catalog-focus-id",focusedPosition>=0&&focusedPosition<adapter.getItemCount()?adapter.getItemId(focusedPosition):-1);out.putBoolean("catalog-grid-focus",grid.hasFocus());
         }
     }

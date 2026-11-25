@@ -229,6 +229,33 @@ public class NetworkPipelineTest {
             release.countDown();
         }
     }
+    @Test public void manualEpisodeKeyShowsReadingToastAfterSilentAutoNext() throws Exception {
+        EpisodeCache.clear();
+        AtomicInteger calls = new AtomicInteger();
+        CountDownLatch release = new CountDownLatch(1);
+        failThenLoadEpisodes(calls, release);
+        android.app.Application app = RuntimeEnvironment.getApplication();
+        new Library(app).prefs.edit().putBoolean("auto-next", true).apply();
+        android.content.Intent intent = new android.content.Intent(app, PlayerActivity.class)
+                .putExtra("showId", 42L).putExtra("title", "自动连播转手动选集");
+        try (var controller = org.robolectric.Robolectric.buildActivity(PlayerActivity.class, intent).setup().visible()) {
+            PlayerActivity player = controller.get();
+            await(() -> calls.get() == 1 && !episodesLoading(player));
+            org.robolectric.shadows.ShadowToast.reset();
+            player.ended();
+            await(() -> calls.get() == 2);
+            assertNull(org.robolectric.shadows.ShadowToast.getTextOfLatestToast());
+            press(player, android.view.KeyEvent.KEYCODE_DPAD_UP);
+            assertEquals("正在读取剧集…", org.robolectric.shadows.ShadowToast.getTextOfLatestToast());
+            release.countDown();
+            await(() -> !episodesLoading(player));
+            android.app.AlertDialog dialog = (android.app.AlertDialog) RefreshRaceTest.field(player, "dialog");
+            assertNotNull(dialog);
+            assertTrue(dialog.isShowing());
+        } finally {
+            release.countDown();
+        }
+    }
     private void failThenLoadEpisodes(AtomicInteger calls, CountDownLatch release) throws Exception {
         http(chain -> {
             Request request = chain.request();

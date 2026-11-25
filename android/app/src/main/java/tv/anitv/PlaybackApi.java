@@ -48,15 +48,16 @@ final class PlaybackApi implements AutoCloseable {
         return base.newBuilder().addPathSegment("bangumi").addPathSegment("episodes").addPathSegment(Long.toString(id)).build();
     }
     Task episodes(long id, String title, Result<List<Episode>> result) {
-        HttpUrl url=current(base) && session.available(base) && id>0 && id<Show.BANGUMI_OFFSET ? canonicalEpisodesUrl(base,id) : episodesUrl(base,id,title);
+        AccountSession.Snapshot account = session.snapshot(base);
+        HttpUrl url=current(base) && account.available && id>0 && id<Show.BANGUMI_OFFSET ? canonicalEpisodesUrl(base,id) : episodesUrl(base,id,title);
         long cacheEpoch=EpisodeCache.epoch();
         long diskRevision=episodePrefs.getLong("revision",0);
-        String key=url+"|"+session.revision()+"|"+session.available(base)+"|"+cacheEpoch;
+        String key=url+"|"+account.revision+"|"+account.available+"|"+cacheEpoch;
         List<Episode> cached=EpisodeCache.get(key);
         if(cached!=null){Task task=new Task();main.post(()->{if(!closed && !task.cancelled.get())result.success(cached);});return task;}
         Task task=new Task();
         okhttp3.Request request=new okhttp3.Request.Builder().url(url).tag(CatalogRepository.CacheScope.class,
-                new CatalogRepository.CacheScope(session.revision()+":"+session.available(base)+":"+diskRevision)).build();
+                new CatalogRepository.CacheScope(account.revision+":"+account.available+":"+diskRevision)).build();
         class EpisodesResult implements CatalogRepository.Listener {
             long cachedUntil;
             boolean active(){return !closed && !task.cancelled.get();}
@@ -93,7 +94,8 @@ final class PlaybackApi implements AutoCloseable {
         java.util.Collections.addAll(candidates, current(base) ? MetadataTitles.queries(titles) : new String[]{titles[0]});
         Task task = new Task();
         java.util.List<String> names=new java.util.ArrayList<>(candidates);
-        if(current(base) && session.available(base) && id>0 && id<Show.BANGUMI_OFFSET) {
+        AccountSession.Snapshot account = session.snapshot(base);
+        if(current(base) && account.available && id>0 && id<Show.BANGUMI_OFFSET) {
             result.progress("正在读取完整线路…");
             HttpUrl full=base.newBuilder().addPathSegment("vod").addPathSegment(Long.toString(id)).addPathSegment(Integer.toString(episode.number)).build();
             request(full,PlaybackCodec::sources,task,new Result<List<PlaySource>>() {

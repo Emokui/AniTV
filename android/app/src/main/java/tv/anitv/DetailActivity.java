@@ -46,17 +46,19 @@ public final class DetailActivity extends Activity {
     private boolean resumed;
     private AlertDialog episodeDialog;
     private boolean restoreDetailPosition;
+    private boolean favoritedInSession;
+    private int hydratedFavoriteFields;
     private int contentGeneration;
-    private boolean leavingForRelated,contentReleased;private int savedDetailScroll,savedRelatedPosition;private boolean savedRelatedFocus;
+    private boolean leavingForRelated,contentReleased;private int savedDetailScroll,savedRelatedPosition,savedHydratedFavoriteFields;private boolean savedRelatedFocus,savedFavoritedInSession;
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        if(state!=null){restoreDetailPosition=true;savedDetailScroll=state.getInt("detail-scroll");savedRelatedPosition=state.getInt("detail-related");savedRelatedFocus=state.getBoolean("detail-related-focus");}
+        if(state!=null){restoreDetailPosition=true;savedDetailScroll=state.getInt("detail-scroll");savedRelatedPosition=state.getInt("detail-related");savedRelatedFocus=state.getBoolean("detail-related-focus");savedFavoritedInSession=state.getBoolean("detail-favorited-session");savedHydratedFavoriteFields=state.getInt("detail-hydrated-favorite-fields");}
         renderContent();
     }
     private void renderContent(){
-        contentGeneration++;contentReleased=false;leavingForRelated=false;detailFresh=false;relatedFresh=false;detailFailure=null;selecting=false;episodesLoading=false;episodesLoaded=false;pendingRelated=-1;relatedPosition=savedRelatedPosition;
+        contentGeneration++;contentReleased=false;leavingForRelated=false;favoritedInSession=savedFavoritedInSession;hydratedFavoriteFields=savedHydratedFavoriteFields;detailFresh=false;relatedFresh=false;detailFailure=null;selecting=false;episodesLoading=false;episodesLoaded=false;pendingRelated=-1;relatedPosition=savedRelatedPosition;
         Ui.fullscreen(this);
-        show = new Show(getIntent().getLongExtra("id", 0), value("title"), value("image"), value("subtitle"),getIntent().getBooleanExtra("r18",false));
+        show = new Show(getIntent().getLongExtra("id", 0), value("title"), value("image"), PlaybackHistory.cleanSubtitle(value("subtitle")),getIntent().getBooleanExtra("r18",false));
         playbackTitles = MetadataTitles.merge(new String[]{show.title}, getIntent().getStringArrayExtra("playbackTitles"));
         relatedCandidates=new java.util.ArrayList<>();
         boolean demo = getIntent().getBooleanExtra("demo", false);
@@ -87,7 +89,12 @@ public final class DetailActivity extends Activity {
         play.setEnabled(!demo); play.setFocusable(!demo); play.setAlpha(demo ? .45f : 1);
         actions.addView(play);
         favorite = Ui.button(this, library.contains(show.id) ? "已收藏 · 移除" : "收藏番剧", null);
-        favorite.setOnClickListener(v -> favorite.setText(library.toggle(show) ? "已收藏 · 移除" : "收藏番剧"));
+        favorite.setOnClickListener(v -> {
+            boolean added = library.toggle(show);
+            favoritedInSession = added;
+            if (!added) hydratedFavoriteFields = 0;
+            favorite.setText(added ? "已收藏 · 移除" : "收藏番剧");
+        });
         LinearLayout.LayoutParams favParams = new LinearLayout.LayoutParams(-2, -2); favParams.leftMargin = dp(12);
         actions.addView(favorite, favParams); if (demo) favorite.requestFocus(); else play.requestFocus();
         episodeStatus = Ui.text(this, demo ? "界面示例 · 此卡片没有在线播放内容" : "正在读取剧集…", 11, Ui.ACCENT);
@@ -123,6 +130,8 @@ public final class DetailActivity extends Activity {
             if(!show.fromBangumi())loadRelated(library.endpoint());
             final int contentToken=contentGeneration;
             final long historyRevision=new PlaybackHistory(this).revision();
+            final Show initialShow=show;
+            final String[] initialTitles=playbackTitles;
             job = repository.request(detailRequest, true, new CatalogRepository.Listener() {
                 @Override public void loaded(byte[] bytes, boolean cached) {
                     repository.decode(() -> {
@@ -140,20 +149,28 @@ public final class DetailActivity extends Activity {
                                 if (!cached) main.post(() -> failed(failure));
                                 return;
                             }
-                            PlaybackHistory.Entry metadata=HistoryMetadata.decode(json,new PlaybackHistory.Entry(show,library.endpoint(),playbackTitles));
+                            PlaybackHistory.Entry metadata=HistoryMetadata.decode(json,new PlaybackHistory.Entry(initialShow,library.endpoint(),initialTitles));
                             String[] names = metadata.titles;
-                            String summary = WirePayload.text(json.opt(show.fromBangumi() ? "summary" : "overview"), "暂无简介");
+                            String summary = WirePayload.text(json.opt(initialShow.fromBangumi() ? "summary" : "overview"), "暂无简介");
                             main.post(() -> {
                                 if (destroyed || contentToken!=contentGeneration || cached && detailFresh) return;
-                                if(!cached){detailFresh=true;if(show.fromBangumi() || detailScope.equals(new AccountSession(DetailActivity.this).cacheScope(endpointUrl)))repository.save(detailRequest,bytes);}
+                                if(!cached){detailFresh=true;if(initialShow.fromBangumi() || detailScope.equals(new AccountSession(DetailActivity.this).cacheScope(endpointUrl)))repository.save(detailRequest,bytes);}
+                                String previousTitle=show.title;
                                 boolean unknown=PlaybackHistory.missingTitle(show);
-                                show=new Show(show.id,metadata.show.title,metadata.show.image.isEmpty()?show.image:metadata.show.image,show.subtitle,metadata.show.r18);
+                                String nextSubtitle=initialShow.subtitle.isEmpty()
+                                        ? (metadata.show.subtitle.isEmpty()?show.subtitle:metadata.show.subtitle)
+                                        : initialShow.subtitle;
+                                show=new Show(show.id,metadata.show.title,metadata.show.image.isEmpty()?show.image:metadata.show.image,nextSubtitle,show.r18 || metadata.show.r18);
                                 title.setText(show.title);
+                                subtitle.setText(show.subtitle);
                                 Glide.with(DetailActivity.this).load(show.image.isEmpty()?null:show.image).override(dp(175),dp(248))
                                         .centerCrop().dontAnimate().placeholder(new PosterDrawable(show.id)).error(new PosterDrawable(show.id)).into(poster);
                                 playbackTitles = names;
                                 displayRelated();
                                 new PlaybackHistory(DetailActivity.this).enrich(metadata,historyRevision);
+                                hydratedFavoriteFields |= new Library(DetailActivity.this).syncFavoriteFields(
+                                        show, favoritedInSession ? Library.REPLACE_ALL : hydratedFavoriteFields,
+                                        MetadataTitles.merge(new String[]{initialShow.title, previousTitle}, names)) & Library.REPLACE_ALL;
                                 if(unknown && !PlaybackHistory.missingTitle(show))loadEpisodes(true);
                                 overview.setText(summary.isEmpty() ? "暂无简介" : summary);restoreDetailScroll();
                                 status.setText((show.fromBangumi() ? "Bangumi 简介 · " : "") + (cached ? detailFailure==null?"显示缓存，正在更新…":"显示缓存 · 更新失败" : "简介已更新"));
@@ -307,7 +324,7 @@ public final class DetailActivity extends Activity {
             pageScroll.scrollTo(0,savedDetailScroll);if(available>=savedDetailScroll)restoreDetailPosition=false;
         });
     }
-    private void captureDetailPosition(){if(pageScroll!=null){savedDetailScroll=pageScroll.getScrollY();savedRelatedPosition=relatedPosition;savedRelatedFocus=relatedGrid.hasFocus();}}
+    private void captureDetailPosition(){savedFavoritedInSession=favoritedInSession;savedHydratedFavoriteFields=hydratedFavoriteFields;if(pageScroll!=null){savedDetailScroll=pageScroll.getScrollY();savedRelatedPosition=relatedPosition;savedRelatedFocus=relatedGrid.hasFocus();}}
     private void releaseContent(){
         contentGeneration++;
         if(relatedJob!=null)relatedJob.cancel();if(job!=null)job.cancel();if(repository!=null)repository.close();
@@ -323,7 +340,7 @@ public final class DetailActivity extends Activity {
         super.onStop();
     }
     @Override protected void onRestart(){super.onRestart();if(contentReleased){restoreDetailPosition=true;renderContent();restoreDetailScroll();}}
-    @Override protected void onSaveInstanceState(Bundle state){captureDetailPosition();super.onSaveInstanceState(state);state.putInt("detail-scroll",savedDetailScroll);state.putInt("detail-related",savedRelatedPosition);state.putBoolean("detail-related-focus",savedRelatedFocus);}
+    @Override protected void onSaveInstanceState(Bundle state){captureDetailPosition();super.onSaveInstanceState(state);state.putInt("detail-scroll",savedDetailScroll);state.putInt("detail-related",savedRelatedPosition);state.putBoolean("detail-related-focus",savedRelatedFocus);state.putBoolean("detail-favorited-session",savedFavoritedInSession);state.putInt("detail-hydrated-favorite-fields",savedHydratedFavoriteFields);}
     private String value(String key) { String value = getIntent().getStringExtra(key); return value == null ? "" : value; }
     private int dp(float value) { return Ui.dp(this, value); }
     @Override protected void onResume() { super.onResume(); resumed = true; Ui.fullscreen(this); }

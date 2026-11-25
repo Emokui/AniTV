@@ -25,12 +25,12 @@ final class PlayerDrawer {
         TextView heading=Ui.text(activity,title,22,Ui.TEXT);Ui.bold(heading);panel.addView(heading);
         TextView description=Ui.text(activity,subtitle,11,Ui.MUTED);
         LinearLayout.LayoutParams dp=new LinearLayout.LayoutParams(-1,-2);dp.topMargin=Ui.dp(activity,7);panel.addView(description,dp);
-        if(current!=null){
-            TextView summary=Ui.text(activity,current,12,Ui.ACCENT);summary.setMaxLines(2);summary.setEllipsize(TextUtils.TruncateAt.END);
-            summary.setPadding(Ui.dp(activity,10),Ui.dp(activity,10),Ui.dp(activity,10),Ui.dp(activity,10));
-            summary.setBackground(Ui.shape(activity,0xff302730,8,0));
-            LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(-1,-2);sp.topMargin=Ui.dp(activity,14);panel.addView(summary,sp);
-        }
+        TextView summary=Ui.text(activity,current==null?"":current,12,Ui.ACCENT);summary.setMaxLines(2);summary.setEllipsize(TextUtils.TruncateAt.END);
+        summary.setTag("drawer-current-summary");
+        summary.setPadding(Ui.dp(activity,10),Ui.dp(activity,10),Ui.dp(activity,10),Ui.dp(activity,10));
+        summary.setBackground(Ui.shape(activity,0xff302730,8,0));
+        summary.setVisibility(current==null?View.GONE:View.VISIBLE);
+        LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(-1,-2);sp.topMargin=Ui.dp(activity,14);panel.addView(summary,sp);
         TextView hint=Ui.text(activity,"↑↓ 选择   确认应用   返回关闭",10,Ui.MUTED);
         LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(-1,-2);hp.topMargin=Ui.dp(activity,12);panel.addView(hint,hp);
         return panel;
